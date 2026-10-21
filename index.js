@@ -25,6 +25,15 @@ const ROUTE_PREFIX = '/_dsh/dsh-sudo-askpass'
 const MAX_BODY_BYTES = 16 * 1024
 const MAX_OUTPUT_CHARS = 20000
 const INVALIDATE_TIMEOUT_MS = 15000
+const SUDO_CANDIDATES = [
+  '/usr/bin/sudo',
+  '/bin/sudo',
+  '/usr/local/bin/sudo',
+  '/opt/homebrew/bin/sudo',
+  '/opt/local/bin/sudo',
+  '/run/current-system/sw/bin/sudo',
+]
+const SUDO_RESOLVER = `SUDO=; for p in ${SUDO_CANDIDATES.join(' ')}; do [ -x "$p" ] && { SUDO=$p; break; }; done; if [ -z "$SUDO" ]; then SUDO=$(command -v sudo 2>/dev/null); case "$SUDO" in /*) ;; *) SUDO= ;; esac; fi; if [ -z "$SUDO" ]; then echo "dsh-sudo-askpass: sudo not found; set sudoPath" >&2; exit 127; fi; exec "$SUDO"`
 
 export const name = 'dsh-sudo-askpass'
 export const inject = ['tools', 'webServer', 'connection']
@@ -115,7 +124,9 @@ function numberOption(value, min, max, fallback) {
  */
 function readOptions(config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
-  const sudoPath = typeof raw.sudoPath === 'string' && /^\/[^\s]+$/.test(raw.sudoPath) ? raw.sudoPath : '/usr/bin/sudo'
+  const sudoPath = typeof raw.sudoPath === 'string' && raw.sudoPath.length > 0 && /^\/[^\s]+$/.test(raw.sudoPath)
+    ? raw.sudoPath
+    : ''
   // 0 means "wait forever", matching a TTY sudo prompt. Positive values are
   // clamped to 1s..1h; cancellation and plugin unload still end the wait.
   const rawPromptTimeout = raw.promptTimeoutMs
@@ -143,7 +154,8 @@ function readOptions(config) {
  */
 function buildRemoteCommand(input) {
   const inner = `exec 0</dev/null; ${input.command}`
-  return `${input.sudoPath} -S -p '' -- sh -c ${shellQuote(inner)}`
+  const launcher = input.sudoPath.length > 0 ? input.sudoPath : SUDO_RESOLVER
+  return `${launcher} -S -p '' -- sh -c ${shellQuote(inner)}`
 }
 
 /**
@@ -254,8 +266,9 @@ function runRemoteSudo(input) {
 function invalidateTicket(input) {
   return new Promise((resolve) => {
     let child
+    const launcher = input.sudoPath.length > 0 ? input.sudoPath : SUDO_RESOLVER
     try {
-      child = spawnSsh(input.host, `${input.sudoPath} -k`, 'ignore')
+      child = spawnSsh(input.host, `${launcher} -k`, 'ignore')
     } catch {
       resolve()
       return

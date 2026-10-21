@@ -91,7 +91,7 @@ function mount(config) {
       },
     },
   }
-  apply(ctx, config)
+  apply(ctx, { sudoPath: '/usr/bin/sudo', ...config })
   assert.ok(toolDefinition, 'tool registered')
   assert.ok(route, 'route registered')
   return { tool: toolDefinition, route, disposers }
@@ -231,6 +231,20 @@ await withMount({ passwordTtlMs: 0, commandTimeoutMs: 1000 }, async ({ tool, get
   await post('/answer', { id: prompt.body.id, password: PASSWORD })
   await rejection
   console.log('ok: finite command timeout rejects')
+})
+
+// 7b. sudoPath empty auto-detects, with a PATH fallback.
+await withMount({ passwordTtlMs: 0, sudoPath: '' }, async ({ tool, getPending, post }) => {
+  const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
+  const prompt = await getPending(5000)
+  await post('/answer', { id: prompt.body.id, password: PASSWORD })
+  const result = await execution
+  assert.match(result, /root-ok/)
+  const text = log()
+  assert.ok(text.includes('command -v sudo'), 'falls back to command -v')
+  assert.ok(text.includes('/usr/bin/sudo'), 'tries the common absolute paths')
+  assert.ok(text.includes('/run/current-system/sw/bin/sudo'), 'covers NixOS')
+  console.log('ok: auto-detects sudo path')
 })
 
 // 8. Cancel and host validation.
