@@ -122,10 +122,14 @@ function readOptions(config) {
   const promptTimeoutMs = rawPromptTimeout === 0 || rawPromptTimeout === '0'
     ? 0
     : numberOption(rawPromptTimeout, 1000, 3600000, 0)
+  const rawCommandTimeout = raw.commandTimeoutMs
+  const commandTimeoutMs = rawCommandTimeout === 0 || rawCommandTimeout === '0'
+    ? 0
+    : numberOption(rawCommandTimeout, 1000, 3600000, 0)
   return {
     promptTimeoutMs,
     passwordTtlMs: numberOption(raw.passwordTtlMs, 0, 3600000, 0),
-    commandTimeoutMs: numberOption(raw.commandTimeoutMs, 1000, 3600000, 600000),
+    commandTimeoutMs,
     sudoPath,
   }
 }
@@ -198,11 +202,13 @@ function runRemoteSudo(input) {
     let stdout = ''
     let stderr = ''
     let settled = false
-    const timer = setTimeout(() => {
-      finish()
-      child.kill('SIGKILL')
-      reject(new Error(`remote command timed out after ${Math.round(input.timeoutMs / 1000)}s`))
-    }, input.timeoutMs)
+    const timer = input.timeoutMs > 0
+      ? setTimeout(() => {
+        finish()
+        child.kill('SIGKILL')
+        reject(new Error(`remote command timed out after ${Math.round(input.timeoutMs / 1000)}s`))
+      }, input.timeoutMs)
+      : undefined
     const onAbort = () => {
       child.kill('SIGKILL')
       finish()

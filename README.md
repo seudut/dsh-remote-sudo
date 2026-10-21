@@ -27,7 +27,7 @@ DSH 的 `bash` 工具没有 TTY、也没有 stdin，`ssh host 'sudo ...'` 无法
 - **stdin 硬化**：root 命令的 stdin 固定重定向到 `/dev/null`。即使 sudo 因为已有 ticket 没有读取密码，残留的密码行也不会被命令读到。
 - **绝对路径 sudo**：默认 `/usr/bin/sudo`，减少远端 PATH 劫持面。
 - **中英文**：跟随 DSH 的语言设置（`ctx.locale`）。
-- **可配超时**：提示等待默认**无限**（和终端 sudo 一样，直到回答或取消），也可以设 1s–1h；密码 TTL、命令超时同样可调。
+- **可配超时**：提示等待和命令执行默认都**无限**（`0` = 一直等，和终端 sudo 一样）；也可以设 1s–1h。密码 TTL 同样可调。
 
 ## 安装
 
@@ -83,7 +83,7 @@ EOF
       config:
         passwordTtlMs: 0         # 0 = 每次都要密码；正整数 = 内存缓存毫秒数
         promptTimeoutMs: 0       # 0 = 无限等待；正整数 = 毫秒（1s - 1h）
-        commandTimeoutMs: 600000
+        commandTimeoutMs: 0       # 0 = 无限等待命令结束
         sudoPath: /usr/bin/sudo  # 必须是绝对路径
 ```
 
@@ -91,7 +91,7 @@ EOF
 |---|---|---|
 | `passwordTtlMs` | `0` | `0` = 每次都要密码；正整数 = 密码在宿主内存保留的毫秒数 |
 | `promptTimeoutMs` | `0` | 面板等待时间；`0` 表示无限（与 TTY sudo 一致），正整数为毫秒（1s–1h） |
-| `commandTimeoutMs` | `600000` | 远端命令超时 |
+| `commandTimeoutMs` | `0` | `0` = 无限；正整数为毫秒（1s–1h）。到期只杀本地 ssh，不保证远端进程停止 |
 | `sudoPath` | `/usr/bin/sudo` | 远端 sudo 绝对路径 |
 
 ## 安全模型
@@ -115,7 +115,8 @@ EOF
 - 只支持 SSH 远端 sudo，**不支持本机 root**。
 - 每次调用新建一条 ssh，没有持久 TTY；插件不假设 sudo ticket 能跨 ssh 复用，并在每次执行后 `sudo -k`。即使远端 ticket 本来可复用，本插件也不会利用它；想减少弹框请用 `passwordTtlMs`。
 - 同时只展示一个 prompt。
-- 默认无限等待：不回答也不取消时，该轮对话会一直保持等待；可以用 `promptTimeoutMs` 设上限，或点取消/停止。
+- 提示和命令默认都无限等待：不回答/不取消时该轮会一直保持；可以设 `promptTimeoutMs`/`commandTimeoutMs` 上限，或点取消/停止。
+- 如果设了 `commandTimeoutMs`，到期只杀本地 ssh，远端命令可能继续；需要硬上限时在远端命令里自己用 `timeout`。
 - 远端需 POSIX shell + sudo；Windows 远端未验证。
 
 ## 开发

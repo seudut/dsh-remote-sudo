@@ -27,6 +27,12 @@ case "$remote" in
   *" -k")
     exit 0
     ;;
+  *slow*)
+    read -r pw
+    sleep 1.2
+    echo "slow-ok"
+    exit 0
+    ;;
   *" -S -p '' -- sh -c "*)
     read -r pw
     if [ "$pw" = ${JSON.stringify(PASSWORD)} ]; then
@@ -207,7 +213,27 @@ await withMount({ passwordTtlMs: 0, promptTimeoutMs: 0 }, async ({ tool, getPend
   console.log('ok: timeout 0 waits until answered')
 })
 
-// 6. Cancel and host validation.
+// 6. Command timeout 0 waits for a slow command.
+await withMount({ passwordTtlMs: 0, commandTimeoutMs: 0 }, async ({ tool, getPending, post }) => {
+  const execution = tool.execute({ host: 'aliyun', command: 'slow' }, { signal: signal() })
+  const prompt = await getPending(5000)
+  await post('/answer', { id: prompt.body.id, password: PASSWORD })
+  const result = await execution
+  assert.match(result, /slow-ok/)
+  console.log('ok: command timeout 0 waits for a slow command')
+})
+
+// 7. A finite command timeout rejects.
+await withMount({ passwordTtlMs: 0, commandTimeoutMs: 1000 }, async ({ tool, getPending, post }) => {
+  const execution = tool.execute({ host: 'aliyun', command: 'slow' }, { signal: signal() })
+  const prompt = await getPending(5000)
+  const rejection = assert.rejects(execution, /timed out/)
+  await post('/answer', { id: prompt.body.id, password: PASSWORD })
+  await rejection
+  console.log('ok: finite command timeout rejects')
+})
+
+// 8. Cancel and host validation.
 await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
   const execution = tool.execute({ host: 'aliyun', command: 'systemctl restart nginx' }, { signal: signal() })
   const rejection = assert.rejects(execution, /cancelled by the user/)
@@ -223,7 +249,7 @@ await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
   console.log('ok: cancel and host validation')
 })
 
-// 7. Route method and id validation.
+// 9. Route method and id validation.
 await withMount({ passwordTtlMs: 0 }, async ({ base, post }) => {
   const missing = await post('/answer', { id: 'nope', password: 'x' })
   assert.equal(missing.status, 409)
