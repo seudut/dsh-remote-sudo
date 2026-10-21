@@ -83,7 +83,7 @@ EOF
       name: 'dsh-sudo-askpass'
       config:
         passwordTtlMs: 0         # 0 = 每次都要密码；正整数 = 内存缓存毫秒数
-        promptTimeoutMs: 0       # 0 = 无限等待；正整数 = 毫秒（1s - 1h）
+        promptTimeoutMs: 0        # 0 = 无限等待；正整数 = 毫秒（1s - 1h）
         commandTimeoutMs: 0       # 0 = 无限等待命令结束
 ```
 
