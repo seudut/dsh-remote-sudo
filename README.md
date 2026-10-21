@@ -24,7 +24,13 @@ A composer-hosted sudo password prompt for DeepSeek Harness: the password goes t
 
 ### 安装
 
-**从 GitHub（推荐）**：
+**从 npm（推荐）**：
+
+```bash
+dsh plugin --profile desktop add dsh-remote-sudo
+```
+
+**从 GitHub**：
 
 ```bash
 dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.0
@@ -103,7 +109,13 @@ node test/real-host-probe.mjs   # 手动：真实主机 + 错误密码验证链�
 
 ### Install
 
-**From GitHub (recommended)**:
+**From npm (recommended)**:
+
+```bash
+dsh plugin --profile desktop add dsh-remote-sudo
+```
+
+**From GitHub**:
 
 ```bash
 dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.0
