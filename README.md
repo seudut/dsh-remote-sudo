@@ -24,13 +24,13 @@ A composer-hosted sudo password prompt for DeepSeek Harness: the password goes t
 
 ### 安装
 
-插件管理器：侧栏 → 插件 → 添加插件 → 安装第三方插件 → 本地目录。
-
-手动：
+**从 GitHub（推荐）**：
 
 ```bash
-dsh plugin --profile desktop add /absolute/path/to/dsh-remote-sudo
+dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.0
 ```
+
+或在插件管理器里选“从 Git 仓库安装”，填 `github:seudut/dsh-remote-sudo#v0.1.0`。
 
 然后在 profile 的 `cordis.patch.yml` 加入：
 
@@ -41,6 +41,8 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-remote-sudo
 ```
 
 重启 DSH。前置条件：`ssh <host>` 能密钥登录。
+
+插件管理器安装会同时处理 bundle 选择；命令行安装需要手动加这一行。本地开发时，把 `github:...` 换成插件目录的绝对路径即可。
 
 ### 配置
 
@@ -101,13 +103,13 @@ node test/real-host-probe.mjs   # 手动：真实主机 + 错误密码验证链�
 
 ### Install
 
-Plugin manager: sidebar → Plugins → Add plugin → Install third-party plugin → Local directory.
-
-Manual:
+**From GitHub (recommended)**:
 
 ```bash
-dsh plugin --profile desktop add /absolute/path/to/dsh-remote-sudo
+dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.0
 ```
+
+Or use the plugin manager's "install from Git repository" with `github:seudut/dsh-remote-sudo#v0.1.0`.
 
 Then add this row to the profile's `cordis.patch.yml`:
 
@@ -118,6 +120,8 @@ Then add this row to the profile's `cordis.patch.yml`:
 ```
 
 Restart DSH. Requires key-based `ssh <host>` access.
+
+The plugin manager also selects the bundle; a CLI install needs this row manually. For local development, replace the `github:...` spec with the absolute path of the checkout.
 
 ### Configuration
 
