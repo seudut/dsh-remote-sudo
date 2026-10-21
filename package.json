@@ -1,0 +1,62 @@
+{
+  "name": "dsh-sudo-askpass",
+  "version": "0.1.0",
+  "description": "Ask for a sudo password in the DSH composer and run remote root commands over SSH without putting the password in the transcript.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seudut/dsh-sudo-askpass.git"
+  },
+  "homepage": "https://github.com/seudut/dsh-sudo-askpass#readme",
+  "bugs": {
+    "url": "https://github.com/seudut/dsh-sudo-askpass/issues"
+  },
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "sudo",
+    "ssh",
+    "askpass",
+    "password",
+    "remote"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node test/host-test.mjs && node test/client-render-test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-session"
+      ]
+    }
+  }
+}

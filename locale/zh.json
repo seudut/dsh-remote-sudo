@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "远程 sudo 密码",
+    "description": "在输入框位置询问 sudo 密码，通过 SSH 执行远端 root 命令。"
+  }
+}

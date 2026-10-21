@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remote sudo password",
+    "description": "Prompts for a sudo password in the composer and runs remote root commands over SSH."
+  }
+}

@@ -1,0 +1,3 @@
+- insert:
+    - id: sudo-askpass
+      name: 'dsh-sudo-askpass'

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Remote sudo password">
+  <rect width="64" height="64" rx="14" fill="#1f6feb"/>
+  <path d="M32 12l16 6v12c0 10-6.6 18.1-16 22-9.4-3.9-16-12-16-22V18l16-6z" fill="#fff" opacity="0.95"/>
+  <circle cx="32" cy="28" r="5" fill="#1f6feb"/>
+  <rect x="30" y="31" width="4" height="9" rx="2" fill="#1f6feb"/>
+</svg>
