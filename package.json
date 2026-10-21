@@ -28,7 +28,8 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/panel.png"
   ],
   "keywords": [
     "dsh",

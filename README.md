@@ -1,8 +1,14 @@
 # dsh-sudo-askpass
 
+![CI](https://github.com/seudut/dsh-sudo-askpass/actions/workflows/ci.yml/badge.svg)
+
 在 DSH 的**输入框位置**弹出 sudo 密码面板，把密码通过 stdin 交给远端 `sudo`。密码不进入对话记录、工具参数、环境变量或磁盘。
 
 > 面向 DSH 0.2.x（在 0.2.1-rc.2 上验证）；宿主 macOS / Linux，远端需 POSIX + sudo。
+
+![DSH 输入框位置的 sudo 密码面板](docs/panel.png)
+
+*截图来自真实的 DSH Web 界面：面板接管 composer 位置，替换输入框。*
 
 ## 为什么
 
