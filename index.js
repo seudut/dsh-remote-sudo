@@ -1,7 +1,7 @@
 /**
- * dsh-sudo-askpass — Host half.
+ * dsh-remote-sudo — Host half.
  *
- * Registers the `remote_sudo` tool and the `/_dsh/dsh-sudo-askpass/*` route the
+ * Registers the `remote_sudo` tool and the `/_dsh/dsh-remote-sudo/*` route the
  * Client half uses to fetch a pending password prompt and submit the password.
  *
  * Password handling: the password lives only in this process's memory and in
@@ -21,7 +21,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 
-const ROUTE_PREFIX = '/_dsh/dsh-sudo-askpass'
+const ROUTE_PREFIX = '/_dsh/dsh-remote-sudo'
 const MAX_BODY_BYTES = 16 * 1024
 const MAX_OUTPUT_CHARS = 20000
 const INVALIDATE_TIMEOUT_MS = 15000
@@ -33,9 +33,9 @@ const SUDO_CANDIDATES = [
   '/opt/local/bin/sudo',
   '/run/current-system/sw/bin/sudo',
 ]
-const SUDO_RESOLVER = `SUDO=; for p in ${SUDO_CANDIDATES.join(' ')}; do [ -x "$p" ] && { SUDO=$p; break; }; done; if [ -z "$SUDO" ]; then SUDO=$(command -v sudo 2>/dev/null); case "$SUDO" in /*) ;; *) SUDO= ;; esac; fi; if [ -z "$SUDO" ]; then echo "dsh-sudo-askpass: sudo not found; set sudoPath" >&2; exit 127; fi; exec "$SUDO"`
+const SUDO_RESOLVER = `SUDO=; for p in ${SUDO_CANDIDATES.join(' ')}; do [ -x "$p" ] && { SUDO=$p; break; }; done; if [ -z "$SUDO" ]; then SUDO=$(command -v sudo 2>/dev/null); case "$SUDO" in /*) ;; *) SUDO= ;; esac; fi; if [ -z "$SUDO" ]; then echo "dsh-remote-sudo: sudo not found; set sudoPath" >&2; exit 127; fi; exec "$SUDO"`
 
-export const name = 'dsh-sudo-askpass'
+export const name = 'dsh-remote-sudo'
 export const inject = ['tools', 'webServer', 'connection']
 
 const TOOL_DESCRIPTION = [
@@ -441,19 +441,19 @@ export function apply(ctx, config = {}) {
       handler: handleRoute,
     })
     return () => dispose()
-  }, 'dsh-sudo-askpass: web route')
+  }, 'dsh-remote-sudo: web route')
 
   ctx.effect(() => () => {
     cachedPasswords.clear()
-  }, 'dsh-sudo-askpass: password cache')
+  }, 'dsh-remote-sudo: password cache')
 
   ctx.effect(() => () => {
     for (const entry of [...pending.values()]) {
-      entry.reject(new Error('dsh-sudo-askpass was unloaded'))
+      entry.reject(new Error('dsh-remote-sudo was unloaded'))
     }
     pending.clear()
     wakeWaiters()
-  }, 'dsh-sudo-askpass: pending prompts')
+  }, 'dsh-remote-sudo: pending prompts')
 
   ctx.tools.register({
     name: 'remote_sudo',
@@ -545,6 +545,6 @@ export function apply(ctx, config = {}) {
         text: SYSTEM_PROMPT_SECTION,
       })
       return () => dispose()
-    }, 'dsh-sudo-askpass: prompt section')
+    }, 'dsh-remote-sudo: prompt section')
   })
 }

@@ -45,7 +45,7 @@ assert.ok(route, 'route registered')
 
 const server = http.createServer((req, res) => route.handler(req, res))
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-const base = `http://127.0.0.1:${server.address().port}/_dsh/dsh-sudo-askpass`
+const base = `http://127.0.0.1:${server.address().port}/_dsh/dsh-remote-sudo`
 
 async function post(path, body) {
   const response = await fetch(`${base}${path}`, {

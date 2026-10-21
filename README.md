@@ -1,6 +1,6 @@
-# dsh-sudo-askpass
+# dsh-remote-sudo
 
-![CI](https://github.com/seudut/dsh-sudo-askpass/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/seudut/dsh-remote-sudo/actions/workflows/ci.yml/badge.svg)
 
 DSH 的远端 sudo 密码面板：在输入框位置弹出，密码只走 stdin，不进对话、工具参数、环境变量或磁盘。
 
@@ -29,7 +29,7 @@ A composer-hosted sudo password prompt for DeepSeek Harness: the password goes t
 手动：
 
 ```bash
-dsh plugin --profile desktop add /absolute/path/to/dsh-sudo-askpass
+dsh plugin --profile desktop add /absolute/path/to/dsh-remote-sudo
 ```
 
 然后在 profile 的 `cordis.patch.yml` 加入：
@@ -37,7 +37,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-sudo-askpass
 ```yaml
 - insert:
     - id: sudo-askpass
-      name: 'dsh-sudo-askpass'
+      name: 'dsh-remote-sudo'
 ```
 
 重启 DSH。前置条件：`ssh <host>` 能密钥登录。
@@ -106,7 +106,7 @@ Plugin manager: sidebar → Plugins → Add plugin → Install third-party plugi
 Manual:
 
 ```bash
-dsh plugin --profile desktop add /absolute/path/to/dsh-sudo-askpass
+dsh plugin --profile desktop add /absolute/path/to/dsh-remote-sudo
 ```
 
 Then add this row to the profile's `cordis.patch.yml`:
@@ -114,7 +114,7 @@ Then add this row to the profile's `cordis.patch.yml`:
 ```yaml
 - insert:
     - id: sudo-askpass
-      name: 'dsh-sudo-askpass'
+      name: 'dsh-remote-sudo'
 ```
 
 Restart DSH. Requires key-based `ssh <host>` access.

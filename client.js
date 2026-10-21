@@ -1,5 +1,5 @@
 /**
- * dsh-sudo-askpass — Client half.
+ * dsh-remote-sudo — Client half.
  *
  * Long-polls the Host route for a pending sudo prompt, publishes it as a
  * `uiSession` pending interaction, and takes over `conversation.composer`
@@ -9,17 +9,17 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-sudo-askpass',
+  id: 'dsh-remote-sudo',
   factory(require) {
     const React = require('react')
     const h = React.createElement
     const { useCallback, useEffect, useRef, useState } = React
 
-    const BASE = '/_dsh/dsh-sudo-askpass'
+    const BASE = '/_dsh/dsh-remote-sudo'
     const POLL_WAIT_MS = 20000
     const RETRY_DELAY_MS = 2000
     const KIND = 'sudo-password'
-    const NS = 'dsh-sudo-askpass'
+    const NS = 'dsh-remote-sudo'
 
     /** Simplified Chinese dictionary. */
     const zh = {
@@ -310,7 +310,7 @@ window.__ModuleLoader__.load({
     return {
       inject: ['locale', 'slots', 'uiSession'],
       apply(ctx) {
-        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-sudo-askpass: dictionaries')
+        ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-remote-sudo: dictionaries')
         const publish = ctx.uiSession.registerPendingInteraction((pending) =>
           pending.kind === KIND ? 3 : 0,
         )
@@ -352,7 +352,7 @@ window.__ModuleLoader__.load({
 
         ctx.effect(() => () => {
           controller.abort()
-        }, 'dsh-sudo-askpass: pending poll')
+        }, 'dsh-remote-sudo: pending poll')
 
         ctx.slots.inject('conversation.composer', () => ctx.slots.register({
           name: 'conversation.composer',

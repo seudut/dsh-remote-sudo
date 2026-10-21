@@ -1,5 +1,5 @@
 /**
- * Host-side integration tests for dsh-sudo-askpass.
+ * Host-side integration tests for dsh-remote-sudo.
  *
  * Mounts the real plugin against a fake Cordis context, serves the real route
  * on a loopback HTTP server, and replaces `ssh` on PATH with a script that
@@ -17,7 +17,7 @@ import { apply } from '../index.js'
 
 const PASSWORD = 's3cret pass'
 
-const binDir = mkdtempSync(join(tmpdir(), 'dsh-sudo-askpass-'))
+const binDir = mkdtempSync(join(tmpdir(), 'dsh-remote-sudo-'))
 const logFile = join(binDir, 'ssh.log')
 const sshPath = join(binDir, 'ssh')
 writeFileSync(sshPath, `#!/bin/bash
@@ -95,7 +95,7 @@ async function withMount(config, run) {
   const { tool, route, disposers } = mount(config)
   const server = http.createServer((req, res) => route.handler(req, res))
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const base = `http://127.0.0.1:${server.address().port}/_dsh/dsh-sudo-askpass`
+  const base = `http://127.0.0.1:${server.address().port}/_dsh/dsh-remote-sudo`
 
   async function getPending(wait = 0) {
     const response = await fetch(`${base}/pending?wait=${wait}`)

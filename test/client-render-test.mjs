@@ -36,7 +36,7 @@ const fakeReact = {
 
 await import(`../client.js?test=${Date.now()}`)
 assert.ok(registration, 'bundle registered')
-assert.equal(registration.id, 'dsh-sudo-askpass')
+assert.equal(registration.id, 'dsh-remote-sudo')
 
 const moduleFace = registration.factory((specifier) => {
   if (specifier === 'react') return fakeReact
@@ -68,7 +68,7 @@ const ctx = {
   },
   locale: {
     register(namespace, dictionaries) {
-      assert.equal(namespace, 'dsh-sudo-askpass')
+      assert.equal(namespace, 'dsh-remote-sudo')
       assert.ok(dictionaries.zh && dictionaries.en)
       return () => {}
     },
@@ -91,7 +91,7 @@ moduleFace.apply(ctx)
 
 assert.equal(slotOptions.name, 'conversation.composer')
 assert.equal(slotOptions.priority, 2)
-assert.equal(slotOptions.locale, 'dsh-sudo-askpass')
+assert.equal(slotOptions.locale, 'dsh-remote-sudo')
 assert.equal(typeof slotOptions.select, 'function')
 assert.equal(precedence({ kind: 'sudo-password' }), 3)
 assert.equal(precedence({ kind: 'approval' }), 0)
