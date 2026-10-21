@@ -118,9 +118,15 @@ function readOptions(config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
   const cacheMode = raw.cacheMode === 'password' || raw.cacheMode === 'none' ? raw.cacheMode : 'sudo'
   const sudoPath = typeof raw.sudoPath === 'string' && /^\/[^\s]+$/.test(raw.sudoPath) ? raw.sudoPath : '/usr/bin/sudo'
+  // 0 means "wait forever", matching a TTY sudo prompt. Positive values are
+  // clamped to 1s..1h; cancellation and plugin unload still end the wait.
+  const rawPromptTimeout = raw.promptTimeoutMs
+  const promptTimeoutMs = rawPromptTimeout === 0 || rawPromptTimeout === '0'
+    ? 0
+    : numberOption(rawPromptTimeout, 1000, 3600000, 0)
   return {
     cacheMode,
-    promptTimeoutMs: numberOption(raw.promptTimeoutMs, 5000, 600000, 120000),
+    promptTimeoutMs,
     passwordTtlMs: numberOption(raw.passwordTtlMs, 0, 3600000, 300000),
     commandTimeoutMs: numberOption(raw.commandTimeoutMs, 1000, 3600000, 600000),
     sudoPath,
@@ -392,10 +398,12 @@ export function apply(ctx, config = {}) {
   function requestPassword(request) {
     const id = randomUUID()
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id)
-        reject(new Error('sudo password prompt timed out'))
-      }, options.promptTimeoutMs)
+      const timer = options.promptTimeoutMs > 0
+        ? setTimeout(() => {
+          pending.delete(id)
+          reject(new Error('sudo password prompt timed out'))
+        }, options.promptTimeoutMs)
+        : undefined
       const entry = {
         id,
         host: request.host,

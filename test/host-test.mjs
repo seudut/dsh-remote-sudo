@@ -246,6 +246,29 @@ await withMount({ cacheMode: 'password', passwordTtlMs: 60000 }, async ({ tool, 
   console.log('ok: wrong password clears the cache')
 })
 
+// 6b. A finite prompt timeout rejects; 0 waits indefinitely.
+await withMount({ cacheMode: 'none', promptTimeoutMs: 1000 }, async ({ tool, getPending }) => {
+  setMode('ticket')
+  const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
+  const rejection = assert.rejects(execution, /timed out/)
+  const pending = await getPending(1000)
+  assert.equal(pending.body.host, 'aliyun')
+  await rejection
+  console.log('ok: finite prompt timeout rejects')
+})
+
+await withMount({ cacheMode: 'none', promptTimeoutMs: 0 }, async ({ tool, getPending, post }) => {
+  setMode('ticket')
+  const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
+  const pending = await getPending(5000)
+  await new Promise((resolve) => setTimeout(resolve, 1300))
+  const answer = await post('/answer', { id: pending.body.id, password: PASSWORD })
+  assert.equal(answer.status, 200)
+  const result = await execution
+  assert.match(result, /root-ok/)
+  console.log('ok: zero prompt timeout waits until answered')
+})
+
 // 7. Cancel and validation still work.
 await withMount({ cacheMode: 'sudo' }, async ({ tool, getPending, post }) => {
   setMode('password')

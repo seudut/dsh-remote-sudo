@@ -30,7 +30,7 @@ DSH 的 `bash` 工具没有 TTY、也没有 stdin，`ssh host 'sudo ...'` 无法
 - **stdin 硬化**：root 命令的 stdin 固定重定向到 `/dev/null`。即使 sudo 因 ticket 有效而没有读取密码，残留的密码行也不会被命令读到。
 - **绝对路径 sudo**：默认 `/usr/bin/sudo`，减少远端 PATH 劫持面。
 - **中英文**：跟随 DSH 的语言设置（`ctx.locale`）。
-- **可配超时**：提示超时、密码 TTL、命令超时都可调。
+- **可配超时**：提示等待默认**无限**（和终端 sudo 一样，直到回答或取消），也可以设 1s–1h；密码 TTL、命令超时同样可调。
 
 ## 安装
 
@@ -73,7 +73,7 @@ EOF
 
 - sudo 已有有效 ticket：直接执行，不弹框；
 - 需要密码：面板出现，输入后执行；
-- 取消或超时：本次工具调用失败，不会挂起后续对话。
+- 取消或停止：本次工具调用失败，不会挂起后续对话；默认没有提示超时，会一直等待。
 
 前置条件：`ssh <host>` 必须能**密钥登录**（插件传 `BatchMode=yes`，不会询问 SSH 密码）。
 
@@ -85,7 +85,7 @@ EOF
       name: 'dsh-sudo-askpass'
       config:
         cacheMode: sudo          # sudo | password | none
-        promptTimeoutMs: 120000  # 5s - 10min
+        promptTimeoutMs: 0       # 0 = 无限等待；正整数 = 毫秒（1s - 1h）
         passwordTtlMs: 300000    # 仅 password 模式，0 关闭缓存
         commandTimeoutMs: 600000
         sudoPath: /usr/bin/sudo  # 必须是绝对路径
@@ -94,7 +94,7 @@ EOF
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `cacheMode` | `sudo` | `sudo` 用 sudo 时间戳；`password` 额外缓存密码；`none` 每次强制 |
-| `promptTimeoutMs` | `120000` | 面板等待时间，超时后工具失败 |
+| `promptTimeoutMs` | `0` | 面板等待时间；`0` 表示无限（与 TTY sudo 一致），正整数为毫秒（1s–1h） |
 | `passwordTtlMs` | `300000` | `password` 模式的宿主内存 TTL；`0` 关闭 |
 | `commandTimeoutMs` | `600000` | 远端命令超时 |
 | `sudoPath` | `/usr/bin/sudo` | 远端 sudo 绝对路径 |
@@ -120,6 +120,7 @@ EOF
 - 只支持 SSH 远端 sudo，**不支持本机 root**。
 - 每次调用新建一条 ssh，没有持久 TTY；sudo ticket 能否跨调用复用取决于远端 `sudoers`（`timestamp_type`、`tty_tickets`、`timestamp_timeout`）。`sudo` 模式在 ticket 有效时不弹框；如果远端不共享无 TTY 的 ticket，可改用 `password` 模式。
 - 同时只展示一个 prompt。
+- 默认无限等待：不回答也不取消时，该轮对话会一直保持等待；可以用 `promptTimeoutMs` 设上限，或点取消/停止。
 - 远端需 POSIX shell + sudo；Windows 远端未验证。
 
 ## 开发
