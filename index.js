@@ -10,12 +10,12 @@
  * with stdin redirected to /dev/null so a password that sudo did not need can
  * never be read by the command.
  *
- * Caching: the default `sudo` mode delegates to sudo's own timestamp. A
- * preflight `sudo -n true` decides whether a prompt is needed, exactly like a
- * terminal: the first call asks, later calls inside the sudo timeout run
- * without asking. `password` mode adds a host-memory password cache for hosts
- * whose sudo cannot reuse a no-TTY timestamp. `none` forces a prompt per call
- * and invalidates the remote timestamp afterwards.
+ * Caching: every call asks for the password by default. When `passwordTtlMs`
+ * is positive, the host keeps the password in memory for that long and reuses
+ * it, so repeated root commands inside the window do not prompt again. This is
+ * only an in-memory cache: the remote sudo timestamp is always invalidated
+ * with `sudo -k` after each command, because no-TTY tickets are not assumed to
+ * survive across ssh invocations.
  */
 
 import { spawn } from 'node:child_process'
@@ -24,7 +24,6 @@ import { randomUUID } from 'node:crypto'
 const ROUTE_PREFIX = '/_dsh/dsh-sudo-askpass'
 const MAX_BODY_BYTES = 16 * 1024
 const MAX_OUTPUT_CHARS = 20000
-const PROBE_TIMEOUT_MS = 20000
 const INVALIDATE_TIMEOUT_MS = 15000
 
 export const name = 'dsh-sudo-askpass'
@@ -32,8 +31,8 @@ export const inject = ['tools', 'webServer', 'connection']
 
 const TOOL_DESCRIPTION = [
   'Run a command with sudo on a remote host over SSH.',
-  'DSH opens a password prompt only when sudo needs a password; the password is fed to sudo over stdin and is never stored, logged, or returned.',
-  'If sudo already holds a valid timestamp, the command runs without prompting.',
+  'DSH opens a password prompt; the password is fed to sudo over stdin and is never stored, logged, or returned.',
+  'By default every call asks. Set passwordTtlMs to reuse the password from host memory for a short window; the remote sudo timestamp is always invalidated afterwards.',
   'Use this instead of bash for any remote command that needs root, for example apt-get, dpkg, systemctl on a VPS.',
   'The host argument is an SSH host alias from ~/.ssh/config (for example "aliyun").',
   'SSH must authenticate with a key (BatchMode=yes is passed), so this tool never asks for an SSH password.',
@@ -112,11 +111,10 @@ function numberOption(value, min, max, fallback) {
 /**
  * Resolve the plugin row's config with safe defaults.
  * @param {unknown} config raw row config.
- * @returns {{cacheMode: 'sudo'|'password'|'none', promptTimeoutMs: number, passwordTtlMs: number, commandTimeoutMs: number, sudoPath: string}} options
+ * @returns {{promptTimeoutMs: number, passwordTtlMs: number, commandTimeoutMs: number, sudoPath: string}} options
  */
 function readOptions(config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
-  const cacheMode = raw.cacheMode === 'password' || raw.cacheMode === 'none' ? raw.cacheMode : 'sudo'
   const sudoPath = typeof raw.sudoPath === 'string' && /^\/[^\s]+$/.test(raw.sudoPath) ? raw.sudoPath : '/usr/bin/sudo'
   // 0 means "wait forever", matching a TTY sudo prompt. Positive values are
   // clamped to 1s..1h; cancellation and plugin unload still end the wait.
@@ -125,9 +123,8 @@ function readOptions(config) {
     ? 0
     : numberOption(rawPromptTimeout, 1000, 3600000, 0)
   return {
-    cacheMode,
     promptTimeoutMs,
-    passwordTtlMs: numberOption(raw.passwordTtlMs, 0, 3600000, 300000),
+    passwordTtlMs: numberOption(raw.passwordTtlMs, 0, 3600000, 0),
     commandTimeoutMs: numberOption(raw.commandTimeoutMs, 1000, 3600000, 600000),
     sudoPath,
   }
@@ -137,13 +134,12 @@ function readOptions(config) {
  * Build the remote command. The command itself runs with stdin from /dev/null:
  * sudo reads the password from the ssh pipe before exec'ing the shell, so a
  * leftover password line can never reach the root command.
- * @param {{sudoPath: string, usePassword: boolean, command: string}} input command parts.
+ * @param {{sudoPath: string, command: string}} input command parts.
  * @returns {string} remote shell command.
  */
 function buildRemoteCommand(input) {
-  const flag = input.usePassword ? `-S -p ''` : '-n'
   const inner = `exec 0</dev/null; ${input.command}`
-  return `${input.sudoPath} ${flag} -- sh -c ${shellQuote(inner)}`
+  return `${input.sudoPath} -S -p '' -- sh -c ${shellQuote(inner)}`
 }
 
 /**
@@ -245,66 +241,7 @@ function runRemoteSudo(input) {
 }
 
 /**
- * Decide whether sudo needs a password on the remote host.
- * @param {{host: string, sudoPath: string, signal?: AbortSignal}} input probe input.
- * @returns {Promise<'ticket'|'password'>} whether a valid timestamp exists.
- */
-function probeTicket(input) {
-  return new Promise((resolve, reject) => {
-    let child
-    try {
-      child = spawnSsh(input.host, `LC_ALL=C ${input.sudoPath} -n true`, ['ignore', 'pipe', 'pipe'])
-    } catch (error) {
-      reject(new Error(`cannot start ssh: ${error instanceof Error ? error.message : String(error)}`))
-      return
-    }
-
-    let stderr = ''
-    let settled = false
-    const timer = setTimeout(() => {
-      finish()
-      child.kill('SIGKILL')
-      reject(new Error('sudo preflight timed out'))
-    }, PROBE_TIMEOUT_MS)
-    const onAbort = () => {
-      child.kill('SIGKILL')
-      finish()
-      reject(new Error('remote_sudo was aborted'))
-    }
-
-    function finish() {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      input.signal?.removeEventListener('abort', onAbort)
-    }
-
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    child.stderr.on('data', (chunk) => {
-      stderr = appendCapped(stderr, chunk)
-    })
-    child.on('error', (error) => {
-      finish()
-      reject(new Error(`cannot start ssh: ${error.message}`))
-    })
-    child.on('close', (code) => {
-      finish()
-      if (code === 0) {
-        resolve('ticket')
-        return
-      }
-      const text = stderr.toLowerCase()
-      if (text.includes('password is required') || text.includes('no password was provided')) {
-        resolve('password')
-        return
-      }
-      reject(new Error(`sudo preflight failed: ${stderr.trim() || `ssh exit ${code}`}`))
-    })
-  })
-}
-
-/**
- * Invalidate the remote sudo timestamp (used by `cacheMode: none`).
+ * Invalidate the remote sudo timestamp after every command.
  * @param {{host: string, sudoPath: string}} input invalidation target.
  * @returns {Promise<void>} completion; failures are ignored.
  */
@@ -564,48 +501,40 @@ export function apply(ctx, config = {}) {
       }
 
       const sessionId = typeof exec.agent?.session?.id === 'string' ? exec.agent.session.id : undefined
-      const mode = options.cacheMode
-      let ticket = false
-      if (mode !== 'none') {
-        ticket = await probeTicket({ host, sudoPath: options.sudoPath, signal: exec.signal }) === 'ticket'
-      }
 
       let password = ''
-      if (!ticket) {
-        if (mode === 'password') {
-          const cached = cachedPasswords.get(host)
-          if (cached !== undefined && cached.expiresAt > Date.now()) password = cached.value
-        }
-        if (password.length === 0) {
-          password = await requestPassword({
-            host,
-            command,
-            description: typeof args.description === 'string' && args.description.trim().length > 0
-              ? args.description.trim()
-              : undefined,
-            sessionId,
-            signal: exec.signal,
-          })
-          if (mode === 'password' && options.passwordTtlMs > 0) {
-            cachedPasswords.set(host, { value: password, expiresAt: Date.now() + options.passwordTtlMs })
-          }
+      if (options.passwordTtlMs > 0) {
+        const cached = cachedPasswords.get(host)
+        if (cached !== undefined && cached.expiresAt > Date.now()) password = cached.value
+      }
+      if (password.length === 0) {
+        password = await requestPassword({
+          host,
+          command,
+          description: typeof args.description === 'string' && args.description.trim().length > 0
+            ? args.description.trim()
+            : undefined,
+          sessionId,
+          signal: exec.signal,
+        })
+        if (options.passwordTtlMs > 0) {
+          cachedPasswords.set(host, { value: password, expiresAt: Date.now() + options.passwordTtlMs })
         }
       }
 
-      const usePassword = !ticket && password.length > 0
-      const remote = buildRemoteCommand({ sudoPath: options.sudoPath, usePassword, command })
+      const remote = buildRemoteCommand({ sudoPath: options.sudoPath, command })
       let result
       try {
         result = await runRemoteSudo({
           host,
           remote,
-          password: usePassword ? password : '',
+          password,
           timeoutMs: options.commandTimeoutMs,
           signal: exec.signal,
         })
       } finally {
         password = ''
-        if (mode === 'none') await invalidateTicket({ host, sudoPath: options.sudoPath })
+        await invalidateTicket({ host, sudoPath: options.sudoPath })
       }
 
       if (result.code !== 0) {

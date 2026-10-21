@@ -39,7 +39,7 @@ const ctx = {
   },
 }
 
-apply(ctx, { cacheMode: 'none' })
+apply(ctx, { passwordTtlMs: 0 })
 assert.ok(toolDefinition, 'tool registered')
 assert.ok(route, 'route registered')
 

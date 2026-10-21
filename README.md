@@ -17,17 +17,14 @@ DSH 的 `bash` 工具没有 TTY、也没有 stdin，`ssh host 'sudo ...'` 无法
 - 给远端开 `NOPASSWD`（等于常驻 root）；
 - 把密码贴进聊天或脚本（进转录、进日志、进磁盘）。
 
-这个插件补上第三种：**每次需要时，由人在 DSH 界面里输入一次**，密码只走 stdin。
+这个插件补上第三种：**按需由人在 DSH 界面里输入一次**（默认每次调用），密码只走 stdin。
 
 ## 功能
 
 - **composer 审批式面板**：和 approval 一样接管输入框，显示主机、命令、密码框、取消/执行；支持 Enter 提交、Esc 取消。
-- **`sudo -n` 预检**：执行前先探测 sudo 时间戳。ticket 有效时**不弹框、不发密码**，行为和终端里的 sudo 一致。
-- **三种缓存策略**（`cacheMode`）：
-  - `sudo`（默认）：完全交给 sudo 的时间戳；
-  - `password`：额外在宿主内存缓存密码（TTL），适合无 TTY 时 ticket 不共享的主机；
-  - `none`：每次强制弹框，执行后 `sudo -k` 失效远端 ticket。
-- **stdin 硬化**：root 命令的 stdin 固定重定向到 `/dev/null`。即使 sudo 因 ticket 有效而没有读取密码，残留的密码行也不会被命令读到。
+- **单一缓存开关（`passwordTtlMs`）**：默认 `0`，每次调用都要输入密码；设为正整数时，密码只在宿主内存保留该时长，期间重复的 root 命令不再弹框。
+- **不依赖远端 ticket**：执行前不探测 ticket，每次执行后都 `sudo -k` 清理远端时间戳。按“无 TTY 的 ticket 不跨 ssh 复用”设计，因此也不会利用一个本来可复用的 ticket。
+- **stdin 硬化**：root 命令的 stdin 固定重定向到 `/dev/null`。即使 sudo 因为已有 ticket 没有读取密码，残留的密码行也不会被命令读到。
 - **绝对路径 sudo**：默认 `/usr/bin/sudo`，减少远端 PATH 劫持面。
 - **中英文**：跟随 DSH 的语言设置（`ctx.locale`）。
 - **可配超时**：提示等待默认**无限**（和终端 sudo 一样，直到回答或取消），也可以设 1s–1h；密码 TTL、命令超时同样可调。
@@ -71,8 +68,8 @@ EOF
 | `command` | 是 | 远端 root 命令，例如 `apt-get update` |
 | `description` | 否 | 面板里显示的短标签，例如“更新 apt 索引” |
 
-- sudo 已有有效 ticket：直接执行，不弹框；
-- 需要密码：面板出现，输入后执行；
+- `passwordTtlMs` 内（已缓存）：直接执行，不弹框；
+- 否则：面板出现，输入后执行；
 - 取消或停止：本次工具调用失败，不会挂起后续对话；默认没有提示超时，会一直等待。
 
 前置条件：`ssh <host>` 必须能**密钥登录**（插件传 `BatchMode=yes`，不会询问 SSH 密码）。
@@ -84,18 +81,16 @@ EOF
     - id: sudo-askpass
       name: 'dsh-sudo-askpass'
       config:
-        cacheMode: sudo          # sudo | password | none
+        passwordTtlMs: 0         # 0 = 每次都要密码；正整数 = 内存缓存毫秒数
         promptTimeoutMs: 0       # 0 = 无限等待；正整数 = 毫秒（1s - 1h）
-        passwordTtlMs: 300000    # 仅 password 模式，0 关闭缓存
         commandTimeoutMs: 600000
         sudoPath: /usr/bin/sudo  # 必须是绝对路径
 ```
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `cacheMode` | `sudo` | `sudo` 用 sudo 时间戳；`password` 额外缓存密码；`none` 每次强制 |
+| `passwordTtlMs` | `0` | `0` = 每次都要密码；正整数 = 密码在宿主内存保留的毫秒数 |
 | `promptTimeoutMs` | `0` | 面板等待时间；`0` 表示无限（与 TTY sudo 一致），正整数为毫秒（1s–1h） |
-| `passwordTtlMs` | `300000` | `password` 模式的宿主内存 TTL；`0` 关闭 |
 | `commandTimeoutMs` | `600000` | 远端命令超时 |
 | `sudoPath` | `/usr/bin/sudo` | 远端 sudo 绝对路径 |
 
@@ -118,7 +113,7 @@ EOF
 ## 限制
 
 - 只支持 SSH 远端 sudo，**不支持本机 root**。
-- 每次调用新建一条 ssh，没有持久 TTY；sudo ticket 能否跨调用复用取决于远端 `sudoers`（`timestamp_type`、`tty_tickets`、`timestamp_timeout`）。`sudo` 模式在 ticket 有效时不弹框；如果远端不共享无 TTY 的 ticket，可改用 `password` 模式。
+- 每次调用新建一条 ssh，没有持久 TTY；插件不假设 sudo ticket 能跨 ssh 复用，并在每次执行后 `sudo -k`。即使远端 ticket 本来可复用，本插件也不会利用它；想减少弹框请用 `passwordTtlMs`。
 - 同时只展示一个 prompt。
 - 默认无限等待：不回答也不取消时，该轮对话会一直保持等待；可以用 `promptTimeoutMs` 设上限，或点取消/停止。
 - 远端需 POSIX shell + sudo；Windows 远端未验证。
@@ -130,11 +125,11 @@ npm test                          # 宿主集成测试 + 客户端渲染测试
 node test/real-host-probe.mjs     # 手动：对真实主机用错误密码验证链路
 ```
 
-宿主测试用 PATH 上的假 `ssh` 模拟 probe / ticket / 密码 / `-k`，不需要真实 sudo。
+宿主测试用 PATH 上的假 `ssh` 模拟 `sudo -S` 密码校验和 `sudo -k`，不需要真实 sudo。
 
 ## English
 
-`dsh-sudo-askpass` adds a `remote_sudo` tool and a composer-hosted password panel to DSH. It runs `ssh <host> sudo ...` and writes the password to ssh's stdin only. A preflight `sudo -n true` reuses sudo's own timestamp, so the panel appears only when a password is actually required. The command's stdin is `/dev/null`, so a leftover password can never reach the root command. The password is never stored in the transcript, tool arguments, environment, argv, or disk. It is an exposure-reduction tool, not a sandbox: the browser/plugin realm, the host process, and a compromised remote remain inside the trust boundary.
+`dsh-sudo-askpass` adds a `remote_sudo` tool and a composer-hosted password panel to DSH. It runs `ssh <host> sudo -S ...` and writes the password to ssh's stdin only. Every call asks by default; a positive `passwordTtlMs` keeps the password in host memory for that window. The remote sudo timestamp is always invalidated with `sudo -k`; the plugin does not reuse no-TTY tickets. The command's stdin is `/dev/null`, so a leftover password can never reach the root command. The password is never stored in the transcript, tool arguments, environment, argv, or disk. It is an exposure-reduction tool, not a sandbox: the browser/plugin realm, the host process, and a compromised remote remain inside the trust boundary.
 
 ## 发布
 
