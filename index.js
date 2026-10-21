@@ -120,27 +120,15 @@ function numberOption(value, min, max, fallback) {
 /**
  * Resolve the plugin row's config with safe defaults.
  * @param {unknown} config raw row config.
- * @returns {{promptTimeoutMs: number, passwordTtlMs: number, commandTimeoutMs: number, sudoPath: string}} options
+ * @returns {{passwordTtlMs: number, sudoPath: string}} options
  */
 function readOptions(config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
   const sudoPath = typeof raw.sudoPath === 'string' && raw.sudoPath.length > 0 && /^\/[^\s]+$/.test(raw.sudoPath)
     ? raw.sudoPath
     : ''
-  // 0 means "wait forever", matching a TTY sudo prompt. Positive values are
-  // clamped to 1s..1h; cancellation and plugin unload still end the wait.
-  const rawPromptTimeout = raw.promptTimeoutMs
-  const promptTimeoutMs = rawPromptTimeout === 0 || rawPromptTimeout === '0'
-    ? 0
-    : numberOption(rawPromptTimeout, 1000, 3600000, 0)
-  const rawCommandTimeout = raw.commandTimeoutMs
-  const commandTimeoutMs = rawCommandTimeout === 0 || rawCommandTimeout === '0'
-    ? 0
-    : numberOption(rawCommandTimeout, 1000, 3600000, 0)
   return {
-    promptTimeoutMs,
     passwordTtlMs: numberOption(raw.passwordTtlMs, 0, 3600000, 0),
-    commandTimeoutMs,
     sudoPath,
   }
 }
@@ -198,7 +186,7 @@ function formatResult(host, command, result) {
 /**
  * Run one remote sudo command. `password` is written to ssh's stdin and then
  * dropped; it is never included in argv, env, the result, or logs.
- * @param {{host: string, remote: string, password: string, timeoutMs: number, signal?: AbortSignal}} input invocation.
+ * @param {{host: string, remote: string, password: string, signal?: AbortSignal}} input invocation.
  * @returns {Promise<{stdout: string, stderr: string, code: number|null, signalName: string|null}>} completed run.
  */
 function runRemoteSudo(input) {
@@ -214,13 +202,6 @@ function runRemoteSudo(input) {
     let stdout = ''
     let stderr = ''
     let settled = false
-    const timer = input.timeoutMs > 0
-      ? setTimeout(() => {
-        finish()
-        child.kill('SIGKILL')
-        reject(new Error(`remote command timed out after ${Math.round(input.timeoutMs / 1000)}s`))
-      }, input.timeoutMs)
-      : undefined
     const onAbort = () => {
       child.kill('SIGKILL')
       finish()
@@ -230,7 +211,6 @@ function runRemoteSudo(input) {
     function finish() {
       if (settled) return
       settled = true
-      clearTimeout(timer)
       input.signal?.removeEventListener('abort', onAbort)
     }
 
@@ -354,12 +334,6 @@ export function apply(ctx, config = {}) {
   function requestPassword(request) {
     const id = randomUUID()
     return new Promise((resolve, reject) => {
-      const timer = options.promptTimeoutMs > 0
-        ? setTimeout(() => {
-          pending.delete(id)
-          reject(new Error('sudo password prompt timed out'))
-        }, options.promptTimeoutMs)
-        : undefined
       const entry = {
         id,
         host: request.host,
@@ -368,12 +342,10 @@ export function apply(ctx, config = {}) {
         ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
         createdAt: Date.now(),
         resolve: (value) => {
-          clearTimeout(timer)
           pending.delete(id)
           resolve(value)
         },
         reject: (error) => {
-          clearTimeout(timer)
           pending.delete(id)
           reject(error)
         },
@@ -548,7 +520,6 @@ export function apply(ctx, config = {}) {
           host,
           remote,
           password,
-          timeoutMs: options.commandTimeoutMs,
           signal: exec.signal,
         })
       } finally {

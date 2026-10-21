@@ -27,12 +27,6 @@ case "$remote" in
   *" -k")
     exit 0
     ;;
-  *slow*)
-    read -r pw
-    sleep 1.2
-    echo "slow-ok"
-    exit 0
-    ;;
   *" -S -p '' -- sh -c "*)
     read -r pw
     if [ "$pw" = ${JSON.stringify(PASSWORD)} ]; then
@@ -191,49 +185,7 @@ await withMount({ passwordTtlMs: 60000 }, async ({ tool, getPending, post }) => 
   console.log('ok: a failed run clears the password cache')
 })
 
-// 4. A finite prompt timeout rejects.
-await withMount({ passwordTtlMs: 0, promptTimeoutMs: 1000 }, async ({ tool, getPending }) => {
-  const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
-  const rejection = assert.rejects(execution, /timed out/)
-  const prompt = await getPending(1000)
-  assert.equal(prompt.body.host, 'aliyun')
-  await rejection
-  console.log('ok: finite prompt timeout rejects')
-})
-
-// 5. Timeout 0 waits until the user answers.
-await withMount({ passwordTtlMs: 0, promptTimeoutMs: 0 }, async ({ tool, getPending, post }) => {
-  const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
-  const prompt = await getPending(5000)
-  await new Promise((resolve) => setTimeout(resolve, 1300))
-  const answer = await post('/answer', { id: prompt.body.id, password: PASSWORD })
-  assert.equal(answer.status, 200)
-  const result = await execution
-  assert.match(result, /root-ok/)
-  console.log('ok: timeout 0 waits until answered')
-})
-
-// 6. Command timeout 0 waits for a slow command.
-await withMount({ passwordTtlMs: 0, commandTimeoutMs: 0 }, async ({ tool, getPending, post }) => {
-  const execution = tool.execute({ host: 'aliyun', command: 'slow' }, { signal: signal() })
-  const prompt = await getPending(5000)
-  await post('/answer', { id: prompt.body.id, password: PASSWORD })
-  const result = await execution
-  assert.match(result, /slow-ok/)
-  console.log('ok: command timeout 0 waits for a slow command')
-})
-
-// 7. A finite command timeout rejects.
-await withMount({ passwordTtlMs: 0, commandTimeoutMs: 1000 }, async ({ tool, getPending, post }) => {
-  const execution = tool.execute({ host: 'aliyun', command: 'slow' }, { signal: signal() })
-  const prompt = await getPending(5000)
-  const rejection = assert.rejects(execution, /timed out/)
-  await post('/answer', { id: prompt.body.id, password: PASSWORD })
-  await rejection
-  console.log('ok: finite command timeout rejects')
-})
-
-// 7b. sudoPath empty auto-detects, with a PATH fallback.
+// 4. sudoPath empty auto-detects, with a PATH fallback.
 await withMount({ passwordTtlMs: 0, sudoPath: '' }, async ({ tool, getPending, post }) => {
   const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
   const prompt = await getPending(5000)
@@ -247,7 +199,7 @@ await withMount({ passwordTtlMs: 0, sudoPath: '' }, async ({ tool, getPending, p
   console.log('ok: auto-detects sudo path')
 })
 
-// 8. Cancel and host validation.
+// 5. Cancel and host validation.
 await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
   const execution = tool.execute({ host: 'aliyun', command: 'systemctl restart nginx' }, { signal: signal() })
   const rejection = assert.rejects(execution, /cancelled by the user/)
@@ -263,7 +215,7 @@ await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
   console.log('ok: cancel and host validation')
 })
 
-// 9. Route method and id validation.
+// 6. Route method and id validation.
 await withMount({ passwordTtlMs: 0 }, async ({ base, post }) => {
   const missing = await post('/answer', { id: 'nope', password: 'x' })
   assert.equal(missing.status, 409)
