@@ -23,10 +23,10 @@ DSH 的 `bash` 工具没有 TTY、也没有 stdin，`ssh host 'sudo ...'` 无法
 
 - **composer 审批式面板**：和 approval 一样接管输入框，显示主机、命令、密码框、取消/执行；支持 Enter 提交、Esc 取消。
 - **单一缓存开关（`passwordTtlMs`）**：默认 `0`，每次调用都要输入密码；设为正整数时，密码只在宿主内存保留该时长，期间重复的 root 命令不再弹框。
-- **自动探测 sudo 路径**：依次尝试 `/usr/bin/sudo`、`/bin/sudo`、`/usr/local/bin/sudo`、Homebrew/MacPorts、NixOS 的路径，最后用 `command -v sudo` 兜底；也可以用 `sudoPath` 显式覆盖。
+- **自动探测 sudo 路径**：依次尝试 `/usr/bin/sudo`、`/bin/sudo`、`/usr/local/bin/sudo`、Homebrew/MacPorts、NixOS 的路径，最后用 `command -v sudo` 兜底。
 - **不依赖远端 ticket**：执行前不探测 ticket，每次执行后都 `sudo -k` 清理远端时间戳。按“无 TTY 的 ticket 不跨 ssh 复用”设计，因此也不会利用一个本来可复用的 ticket。
 - **stdin 硬化**：root 命令的 stdin 固定重定向到 `/dev/null`。即使 sudo 因为已有 ticket 没有读取密码，残留的密码行也不会被命令读到。
-- **绝对路径 sudo**：默认 `/usr/bin/sudo`，减少远端 PATH 劫持面。
+- **优先绝对路径 sudo**：先试标准绝对路径，减少远端 PATH 劫持面。
 - **中英文**：跟随 DSH 的语言设置（`ctx.locale`）。
 - **可配超时**：提示等待和命令执行默认都**无限**（`0` = 一直等，和终端 sudo 一样）；也可以设 1s–1h。密码 TTL 同样可调。
 
@@ -85,7 +85,6 @@ EOF
         passwordTtlMs: 0         # 0 = 每次都要密码；正整数 = 内存缓存毫秒数
         promptTimeoutMs: 0       # 0 = 无限等待；正整数 = 毫秒（1s - 1h）
         commandTimeoutMs: 0       # 0 = 无限等待命令结束
-        # sudoPath: /usr/bin/sudo  # 可选；默认自动探测
 ```
 
 | 键 | 默认 | 说明 |
@@ -93,7 +92,6 @@ EOF
 | `passwordTtlMs` | `0` | `0` = 每次都要密码；正整数 = 密码在宿主内存保留的毫秒数 |
 | `promptTimeoutMs` | `0` | 面板等待时间；`0` 表示无限（与 TTY sudo 一致），正整数为毫秒（1s–1h） |
 | `commandTimeoutMs` | `0` | `0` = 无限；正整数为毫秒（1s–1h）。到期只杀本地 ssh，不保证远端进程停止 |
-| `sudoPath` | 空（自动） | 显式指定远端 sudo 绝对路径；空 = 先试常见绝对路径，再用 `command -v sudo` 兜底 |
 
 ## 安全模型
 
@@ -109,7 +107,7 @@ EOF
 - **单因子**：没有 Touch ID 或硬件密钥；人工闸门就是“输入密码”这一下。
 - **认证后的范围**：密码只负责认证，认证后命令就是 root，不限制它做什么。
 
-**sudo 路径**：自动探测先试固定绝对路径，只有都不存在时才退回 `command -v sudo`（依赖远端 PATH）。如果远端 PATH 不可信，请显式设置 `sudoPath`。
+**sudo 路径**：自动探测先试固定绝对路径，只有都不存在时才退回 `command -v sudo`（依赖远端 PATH）。
 
 **更强替代**：宿主侧原生 askpass（`osascript` hidden answer / `SSH_ASKPASS`）、Touch ID（`pam_tid`）、scoped `NOPASSWD` + DSH 审批。密码建议专用、不与登录密码复用。
 
