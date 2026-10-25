@@ -21,6 +21,7 @@ window.__ModuleLoader__.load({
     const BASE = '/_dsh/dsh-remote-sudo'
     const POLL_WAIT_MS = 20000
     const RETRY_DELAY_MS = 2000
+    const LEGACY_RECHECK_MS = 2000
     const KIND = 'sudo-password'
     const NS = 'dsh-remote-sudo'
 
@@ -157,7 +158,7 @@ window.__ModuleLoader__.load({
 
     /** One published prompt; the composer panel drives answer/cancel. */
     class SudoPrompt {
-      constructor(value) {
+      constructor(value, noteHostState) {
         this.kind = KIND
         this.key = value.id
         this.id = value.id
@@ -165,6 +166,7 @@ window.__ModuleLoader__.load({
         this.command = value.command
         this.description = value.description
         this.sessionId = value.sessionId
+        this.noteHostState = noteHostState
         this.settled = false
         this.completion = new Promise((resolve) => {
           this.resolveCompletion = resolve
@@ -184,6 +186,8 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ id: this.id, password }),
         })
+        const body = await response.json().catch(() => null)
+        this.noteHostState?.(body)
         if (!response.ok) {
           if (response.status === 409) {
             // Another browser answered first or the Host already withdrew the
@@ -191,8 +195,7 @@ window.__ModuleLoader__.load({
             this.settle()
             return
           }
-          const body = await response.json().catch(() => ({}))
-          throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${response.status}`)
+          throw new Error(typeof body?.error === 'string' ? body.error : `HTTP ${response.status}`)
         }
         this.settle()
       }
@@ -200,11 +203,13 @@ window.__ModuleLoader__.load({
       async cancel() {
         if (this.settled) return
         try {
-          await fetch(`${BASE}/cancel`, {
+          const response = await fetch(`${BASE}/cancel`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ id: this.id }),
           })
+          const body = await response.json().catch(() => null)
+          this.noteHostState?.(body)
         } catch {
           // The Host may already have dropped the prompt; cancelling is best effort.
         }
@@ -326,6 +331,42 @@ window.__ModuleLoader__.load({
         const controller = new AbortController()
         let active = null
         let revision = -1
+        let epoch = null
+        /** Prompt ids settled here; a late view must not revive them. */
+        const settledIds = new Set()
+
+        /** Remember one settled prompt id, keeping the set bounded. */
+        function rememberSettled(id) {
+          settledIds.add(id)
+          if (settledIds.size > 50) settledIds.delete(settledIds.values().next().value)
+        }
+
+        /**
+         * Apply the Host identity and revision carried by a view or an
+         * answer/cancel response.
+         * @param {unknown} value Host body with optional `epoch`/`revision`.
+         * @returns {boolean} false when this is an older view that was already
+         *   in flight when a newer revision was learned; it must not revive a
+         *   settled panel.
+         */
+        function applyHostState(value) {
+          if (value === null || typeof value !== 'object') return true
+          const nextEpoch = typeof value.epoch === 'string' ? value.epoch : undefined
+          const epochChanged = nextEpoch !== undefined && epoch !== null && nextEpoch !== epoch
+          if (epochChanged) {
+            // A restarted Host starts a new revision space; drop the old one.
+            revision = -1
+            settledIds.clear()
+          }
+          if (nextEpoch !== undefined) epoch = nextEpoch
+          const viewRevision = Number.isSafeInteger(value.revision) && value.revision >= 0
+            ? value.revision
+            : undefined
+          if (viewRevision === undefined) return true
+          if (viewRevision < revision && !epochChanged) return false
+          revision = viewRevision
+          return true
+        }
 
         /**
          * Reconcile one Host view with the panel this browser shows. The Host
@@ -336,21 +377,23 @@ window.__ModuleLoader__.load({
          */
         function reconcile(value) {
           const view = value !== null && typeof value === 'object' ? value : {}
-          if (Number.isSafeInteger(view.revision) && view.revision >= 0) revision = view.revision
+          if (!applyHostState(view)) return
           const next = typeof view.id === 'string' ? view : null
           if (active !== null && (next === null || next.id !== active.id)) {
             const stale = active
             active = null
+            rememberSettled(stale.id)
             stale.settle()
           }
-          if (next !== null && active === null) {
+          if (next !== null && active === null && !settledIds.has(next.id)) {
             const sessionId = typeof next.sessionId === 'string'
               ? next.sessionId
               : ctx.uiSession.current?.value?.key
-            const prompt = new SudoPrompt({ ...next, sessionId })
+            const prompt = new SudoPrompt({ ...next, sessionId }, applyHostState)
             active = prompt
             const remove = publish(prompt, () => prompt.settle())
             prompt.completion.then(() => {
+              rememberSettled(prompt.id)
               if (active === prompt) active = null
               remove()
             })
@@ -360,7 +403,8 @@ window.__ModuleLoader__.load({
         async function poll() {
           while (!controller.signal.aborted) {
             try {
-              const response = await fetch(`${BASE}/pending?wait=${POLL_WAIT_MS}&since=${revision}`, {
+              const query = `wait=${POLL_WAIT_MS}&since=${revision}&epoch=${encodeURIComponent(epoch ?? '')}`
+              const response = await fetch(`${BASE}/pending?${query}`, {
                 signal: controller.signal,
                 headers: { accept: 'application/json' },
                 cache: 'no-store',
@@ -369,10 +413,9 @@ window.__ModuleLoader__.load({
               const value = await response.json()
               reconcile(value)
               if (active !== null && !Number.isSafeInteger(value?.revision)) {
-                // A Host without revisions cannot push changes; keep the old
-                // blocking behavior instead of repolling the same prompt.
-                await active.completion
-                active = null
+                // A Host without revisions cannot push settlement: re-check at a
+                // low rate so another browser's answer still settles this panel.
+                await new Promise((resolve) => setTimeout(resolve, LEGACY_RECHECK_MS))
               }
             } catch {
               if (controller.signal.aborted) return

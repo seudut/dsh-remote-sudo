@@ -90,7 +90,16 @@ globalThis.window = {
 }
 
 const realFetch = globalThis.fetch
-globalThis.fetch = (url, init) => realFetch(new URL(String(url), base), init)
+/** `/pending` requests currently in flight, both browsers together. */
+let inflightPending = 0
+globalThis.fetch = (url, init) => {
+  const request = realFetch(new URL(String(url), base), init)
+  if (!String(url).includes('/pending')) return request
+  inflightPending += 1
+  return request.finally(() => {
+    inflightPending -= 1
+  })
+}
 
 const fakeReact = {
   createElement(type, props, ...children) {
@@ -117,6 +126,7 @@ async function mountBrowser(name) {
     throw new Error(`unexpected require: ${specifier}`)
   })
   const published = new Map()
+  const errors = []
   const disposers = []
   face.apply({
     effect(fn) {
@@ -138,15 +148,18 @@ async function mountBrowser(name) {
       current: { value: { key: 'session-1' } },
       registerPendingInteraction() {
         return (interaction, delegate) => {
-          assert.equal(typeof delegate, 'function')
-          assert.equal(published.has(interaction.key), false, 'one publication per prompt key')
+          if (typeof delegate !== 'function') errors.push(new Error('publish delegate missing'))
+          if (published.has(interaction.key)) {
+            errors.push(new Error(`duplicate publication: ${interaction.key}`))
+            return () => {}
+          }
           published.set(interaction.key, { interaction, delegate })
           return () => published.delete(interaction.key)
         }
       },
     },
   })
-  return { published, disposers }
+  return { published, errors, disposers }
 }
 
 async function waitFor(predicate, message, timeoutMs = 5000) {
@@ -169,6 +182,7 @@ await waitFor(
   () => desktop.published.size === 1 && phone.published.size === 1,
   'both browsers show the prompt',
 )
+await waitFor(() => inflightPending >= 2, 'both browsers park a long-poll before the answer')
 const desktopPrompt = [...desktop.published.values()][0].interaction
 const phonePrompt = [...phone.published.values()][0].interaction
 assert.equal(desktopPrompt.id, phonePrompt.id, 'both browsers received the same prompt')
@@ -189,12 +203,15 @@ await waitFor(
   () => desktop.published.size === 1 && phone.published.size === 1,
   'both browsers show the second prompt',
 )
+await waitFor(() => inflightPending >= 2, 'both browsers park a long-poll before the abort')
 controller.abort()
 await waitFor(
   () => desktop.published.size === 0 && phone.published.size === 0,
   'stopping the turn settles every panel',
 )
 await abortedRejection
+assert.deepEqual(desktop.errors, [], 'the desktop client recorded no failures')
+assert.deepEqual(phone.errors, [], 'the phone client recorded no failures')
 
 // ── Teardown ─────────────────────────────────────────────────────────────────
 for (const dispose of desktop.disposers) dispose()

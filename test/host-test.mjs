@@ -97,9 +97,10 @@ async function withMount(config, run) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}/_dsh/dsh-remote-sudo`
 
-  async function getPending(wait = 0, since) {
+  async function getPending(wait = 0, since, epoch) {
     const query = new URLSearchParams({ wait: String(wait) })
     if (since !== undefined) query.set('since', String(since))
+    if (epoch !== undefined) query.set('epoch', String(epoch))
     const response = await fetch(`${base}/pending?${query.toString()}`)
     return { status: response.status, body: await response.json() }
   }
@@ -231,28 +232,35 @@ await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
   const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
   const prompt = await getPending(5000)
   assert.equal(typeof prompt.body.revision, 'number', 'the pending view carries a revision')
+  assert.equal(typeof prompt.body.epoch, 'string', 'the pending view carries the Host epoch')
   const revision = prompt.body.revision
 
   // Timing out with an unchanged revision keeps the same prompt instead of
   // reporting it settled.
   const started = Date.now()
-  const timed = await getPending(300, revision)
+  const timed = await getPending(300, revision, prompt.body.epoch)
   assert.ok(Date.now() - started >= 250, 'the long-poll honors the wait window')
   assert.equal(timed.body.id, prompt.body.id, 'an unchanged view keeps the pending prompt')
   assert.equal(timed.body.revision, revision, 'an unchanged view keeps the revision')
 
-  // A second viewer that already observed this revision waits for a change and
-  // must not be woken while the prompt is still pending.
+  // A second viewer that already observed this revision parks its long-poll;
+  // answering must wake it promptly instead of letting it wait out the window.
   let watched = false
-  const watcher = getPending(20000, revision).then((value) => {
+  let watchedAt = 0
+  const watcher = getPending(20000, revision, prompt.body.epoch).then((value) => {
     watched = true
+    watchedAt = Date.now()
     return value
   })
   await new Promise((resolve) => setTimeout(resolve, 250))
-  assert.equal(watched, false, 'unchanged revision keeps the long-poll open')
+  assert.equal(watched, false, 'unchanged revision keeps the long-poll parked')
 
-  await post('/answer', { id: prompt.body.id, password: PASSWORD })
+  const answeredAt = Date.now()
+  const answeredResponse = await post('/answer', { id: prompt.body.id, password: PASSWORD })
+  assert.equal(answeredResponse.status, 200)
+  assert.ok(answeredResponse.body.revision > revision, 'the answer response carries the new revision')
   const answered = await watcher
+  assert.ok(watchedAt - answeredAt < 1000, 'answer wakes the parked long-poll immediately')
   assert.equal(answered.body.id, undefined, 'the settled prompt is gone')
   assert.ok(answered.body.revision > revision, 'answer advances the revision')
   await execution
@@ -261,9 +269,21 @@ await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
   const cancelled = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
   const cancelRejection = assert.rejects(cancelled, /cancelled by the user/)
   const cancelPrompt = await getPending(5000)
-  const cancelWatcher = getPending(20000, cancelPrompt.body.revision)
-  await post('/cancel', { id: cancelPrompt.body.id })
+  let cancelWatched = false
+  let cancelWatchedAt = 0
+  const cancelWatcher = getPending(20000, cancelPrompt.body.revision, cancelPrompt.body.epoch)
+    .then((value) => {
+      cancelWatched = true
+      cancelWatchedAt = Date.now()
+      return value
+    })
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.equal(cancelWatched, false, 'the cancel watcher parks first')
+  const cancelPostedAt = Date.now()
+  const cancelResponse = await post('/cancel', { id: cancelPrompt.body.id })
+  assert.ok(cancelResponse.body.revision > cancelPrompt.body.revision, 'the cancel response carries the new revision')
   const afterCancel = await cancelWatcher
+  assert.ok(cancelWatchedAt - cancelPostedAt < 1000, 'cancel wakes the parked long-poll immediately')
   assert.equal(afterCancel.body.id, undefined, 'the cancelled prompt is gone')
   assert.ok(afterCancel.body.revision > cancelPrompt.body.revision, 'cancel advances the revision')
   await cancelRejection
@@ -273,13 +293,50 @@ await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
   const aborted = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: controller.signal })
   const abortRejection = assert.rejects(aborted, /aborted before the password was entered/)
   const abortPrompt = await getPending(5000)
-  const abortWatcher = getPending(20000, abortPrompt.body.revision)
+  let abortWatched = false
+  let abortWatchedAt = 0
+  const abortWatcher = getPending(20000, abortPrompt.body.revision, abortPrompt.body.epoch)
+    .then((value) => {
+      abortWatched = true
+      abortWatchedAt = Date.now()
+      return value
+    })
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.equal(abortWatched, false, 'the abort watcher parks first')
+  const abortAt = Date.now()
   controller.abort()
   const afterAbort = await abortWatcher
+  assert.ok(abortWatchedAt - abortAt < 1000, 'abort wakes the parked long-poll immediately')
   assert.equal(afterAbort.body.id, undefined, 'the withdrawn prompt is gone')
   assert.ok(afterAbort.body.revision > abortPrompt.body.revision, 'abort advances the revision')
   await abortRejection
   console.log('ok: settling a prompt notifies every polling client')
+})
+
+// 8. A restarted Host is recognized even when its revision matches the client's.
+await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
+  const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
+  const rejection = assert.rejects(execution, /cancelled by the user/)
+  const prompt = await getPending(5000)
+  assert.equal(typeof prompt.body.epoch, 'string')
+
+  // A client that learned revision R from one Host must not park on a different
+  // Host that happens to be at the same revision.
+  const started = Date.now()
+  const mismatched = await getPending(20000, prompt.body.revision, 'a-different-host')
+  assert.ok(Date.now() - started < 1000, 'an epoch mismatch returns without waiting')
+  assert.equal(mismatched.body.id, prompt.body.id, 'the new Host view is delivered')
+  assert.equal(mismatched.body.epoch, prompt.body.epoch, 'the Host epoch is echoed')
+
+  // A Client from before the epoch field stays on revision-only semantics.
+  const legacyStarted = Date.now()
+  const legacyPoll = await getPending(300, prompt.body.revision)
+  assert.ok(Date.now() - legacyStarted >= 250, 'a missing epoch keeps revision-only semantics')
+  assert.equal(legacyPoll.body.id, prompt.body.id)
+
+  await post('/cancel', { id: prompt.body.id })
+  await rejection
+  console.log('ok: a changed Host epoch short-circuits the revision wait')
 })
 
 process.env.PATH = originalPath

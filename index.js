@@ -7,6 +7,8 @@
  * with the revision they last saw: a prompt answered, cancelled, or withdrawn
  * by one browser therefore settles the stale panels on every other browser
  * (for example the desktop when the password was submitted from a phone).
+ * An epoch identifies one Host instance, so a restart cannot hide a new prompt
+ * behind a revision number a client already saw.
  *
  * Password handling: the password lives only in this process's memory and in
  * the ssh child's stdin. It is never placed in the tool call, the session log,
@@ -124,13 +126,14 @@ function numberOption(value, min, max, fallback) {
 /**
  * Parse the `since` revision a polling client already observed.
  * @param {string|null} value raw query value.
- * @returns {number|undefined} non-negative safe integer, or undefined when the
- *   parameter is absent or malformed (the legacy no-revision poll).
+ * @returns {number|undefined} safe integer -1..n (-1 means the client has not
+ *   seen a revision yet), or undefined when the parameter is absent or
+ *   malformed (the legacy no-revision poll).
  */
 function parseRevision(value) {
   if (value === null || value.length === 0) return undefined
   const parsed = Number(value)
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined
+  return Number.isSafeInteger(parsed) && parsed >= -1 ? parsed : undefined
 }
 
 /**
@@ -300,6 +303,8 @@ export function apply(ctx, config = {}) {
   const cachedPasswords = new Map()
   /** Monotonic revision of the pending set, echoed by every `/pending` view. */
   let revision = 0
+  /** Identity of this Host instance; a restart starts a new revision space. */
+  const epoch = randomUUID()
 
   function snapshot() {
     const first = pending.values().next().value
@@ -313,6 +318,7 @@ export function apply(ctx, config = {}) {
       createdAt: first.createdAt,
       count: pending.size,
       revision,
+      epoch,
     }
   }
 
@@ -336,10 +342,17 @@ export function apply(ctx, config = {}) {
    * @param {import('node:http').IncomingMessage} req request used to stop early.
    * @param {number|undefined} since revision the caller already observed;
    *   undefined keeps the legacy policy of waiting only while no prompt exists.
+   * @param {string|undefined} clientEpoch Host instance the caller believes it
+   *   is talking to; a mismatch returns immediately so a restart cannot hide a
+   *   prompt behind a reused revision. Undefined keeps revision-only semantics
+   *   for Clients written before the epoch field existed.
    * @returns {Promise<ReturnType<typeof snapshot>>} prompt snapshot.
    */
-  function waitForPrompt(ms, req, since) {
-    const changed = () => since === undefined ? snapshot() !== null : revision !== since
+  function waitForPrompt(ms, req, since, clientEpoch) {
+    const changed = () => {
+      if (since === undefined) return snapshot() !== null
+      return revision !== since || (clientEpoch !== undefined && clientEpoch !== epoch)
+    }
     if (ms <= 0 || changed()) return Promise.resolve(snapshot())
     return new Promise((resolve) => {
       let settled = false
@@ -417,8 +430,9 @@ export function apply(ctx, config = {}) {
         const requested = Number(url.searchParams.get('wait') ?? '0')
         const wait = Number.isFinite(requested) ? Math.min(Math.max(requested, 0), 25000) : 0
         const since = parseRevision(url.searchParams.get('since'))
-        const prompt = await waitForPrompt(wait, req, since)
-        sendJson(res, 200, prompt ?? { revision })
+        const clientEpoch = url.searchParams.get('epoch') ?? undefined
+        const prompt = await waitForPrompt(wait, req, since, clientEpoch)
+        sendJson(res, 200, prompt ?? { revision, epoch })
         return
       }
 
@@ -432,15 +446,15 @@ export function apply(ctx, config = {}) {
         const password = typeof body?.password === 'string' ? body.password : ''
         const entry = pending.get(id)
         if (entry === undefined) {
-          sendJson(res, 409, { error: 'no pending prompt with that id' })
+          sendJson(res, 409, { error: 'no pending prompt with that id', revision, epoch })
           return
         }
         if (password.length === 0) {
-          sendJson(res, 400, { error: 'password required' })
+          sendJson(res, 400, { error: 'password required', revision, epoch })
           return
         }
         entry.resolve(password)
-        sendJson(res, 200, { ok: true })
+        sendJson(res, 200, { ok: true, revision, epoch })
         return
       }
 
@@ -453,11 +467,11 @@ export function apply(ctx, config = {}) {
         const id = typeof body?.id === 'string' ? body.id : ''
         const entry = pending.get(id)
         if (entry === undefined) {
-          sendJson(res, 409, { error: 'no pending prompt with that id' })
+          sendJson(res, 409, { error: 'no pending prompt with that id', revision, epoch })
           return
         }
         entry.reject(new Error('sudo password prompt was cancelled by the user'))
-        sendJson(res, 200, { ok: true })
+        sendJson(res, 200, { ok: true, revision, epoch })
         return
       }
 
