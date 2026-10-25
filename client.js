@@ -1,11 +1,14 @@
 /**
  * dsh-remote-sudo — Client half.
  *
- * Long-polls the Host route for a pending sudo prompt, publishes it as a
- * `uiSession` pending interaction, and takes over `conversation.composer`
- * exactly like the approval panel: the prompt replaces the composer while it
- * is pending. The password travels browser → Host over the same authenticated
- * origin; it never enters the session log or a tool call.
+ * Long-polls the Host route for a pending sudo prompt and the pending-set
+ * revision, publishes it as a `uiSession` pending interaction, and takes over
+ * `conversation.composer` exactly like the approval panel: the prompt replaces
+ * the composer while it is pending. Because the Host is polled even while a
+ * panel is open, a prompt answered or cancelled by another browser (a phone
+ * through dsh-pocket, another tab) settles this panel instead of stranding it.
+ * The password travels browser → Host over the same authenticated origin; it
+ * never enters the session log or a tool call.
  */
 
 window.__ModuleLoader__.load({
@@ -182,6 +185,12 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ id: this.id, password }),
         })
         if (!response.ok) {
+          if (response.status === 409) {
+            // Another browser answered first or the Host already withdrew the
+            // prompt: the panel must go away instead of showing an error.
+            this.settle()
+            return
+          }
           const body = await response.json().catch(() => ({}))
           throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${response.status}`)
         }
@@ -316,30 +325,54 @@ window.__ModuleLoader__.load({
         )
         const controller = new AbortController()
         let active = null
+        let revision = -1
+
+        /**
+         * Reconcile one Host view with the panel this browser shows. The Host
+         * is authoritative: when the prompt disappears, another browser
+         * answered, cancelled, or withdrew it, and this panel must settle
+         * instead of waiting for an answer that will never come.
+         * @param {unknown} value decoded `/pending` body.
+         */
+        function reconcile(value) {
+          const view = value !== null && typeof value === 'object' ? value : {}
+          if (Number.isSafeInteger(view.revision) && view.revision >= 0) revision = view.revision
+          const next = typeof view.id === 'string' ? view : null
+          if (active !== null && (next === null || next.id !== active.id)) {
+            const stale = active
+            active = null
+            stale.settle()
+          }
+          if (next !== null && active === null) {
+            const sessionId = typeof next.sessionId === 'string'
+              ? next.sessionId
+              : ctx.uiSession.current?.value?.key
+            const prompt = new SudoPrompt({ ...next, sessionId })
+            active = prompt
+            const remove = publish(prompt, () => prompt.settle())
+            prompt.completion.then(() => {
+              if (active === prompt) active = null
+              remove()
+            })
+          }
+        }
 
         async function poll() {
           while (!controller.signal.aborted) {
-            if (active !== null) {
-              await active.completion
-              active = null
-              continue
-            }
             try {
-              const response = await fetch(`${BASE}/pending?wait=${POLL_WAIT_MS}`, {
+              const response = await fetch(`${BASE}/pending?wait=${POLL_WAIT_MS}&since=${revision}`, {
                 signal: controller.signal,
                 headers: { accept: 'application/json' },
                 cache: 'no-store',
               })
               if (!response.ok) throw new Error(`HTTP ${response.status}`)
               const value = await response.json()
-              if (value !== null && typeof value === 'object' && typeof value.id === 'string') {
-                const sessionId = typeof value.sessionId === 'string'
-                  ? value.sessionId
-                  : ctx.uiSession.current?.value?.key
-                const prompt = new SudoPrompt({ ...value, sessionId })
-                active = prompt
-                const remove = publish(prompt, () => prompt.settle())
-                prompt.completion.then(() => remove())
+              reconcile(value)
+              if (active !== null && !Number.isSafeInteger(value?.revision)) {
+                // A Host without revisions cannot push changes; keep the old
+                // blocking behavior instead of repolling the same prompt.
+                await active.completion
+                active = null
               }
             } catch {
               if (controller.signal.aborted) return

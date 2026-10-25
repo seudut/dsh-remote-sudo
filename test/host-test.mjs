@@ -97,8 +97,10 @@ async function withMount(config, run) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}/_dsh/dsh-remote-sudo`
 
-  async function getPending(wait = 0) {
-    const response = await fetch(`${base}/pending?wait=${wait}`)
+  async function getPending(wait = 0, since) {
+    const query = new URLSearchParams({ wait: String(wait) })
+    if (since !== undefined) query.set('since', String(since))
+    const response = await fetch(`${base}/pending?${query.toString()}`)
     return { status: response.status, body: await response.json() }
   }
 
@@ -222,6 +224,62 @@ await withMount({ passwordTtlMs: 0 }, async ({ base, post }) => {
   const bad = await fetch(`${base}/pending?wait=0`, { method: 'POST' })
   assert.equal(bad.status, 405)
   console.log('ok: route method and id validation')
+})
+
+// 7. Every polling client learns when a prompt is settled by another one.
+await withMount({ passwordTtlMs: 0 }, async ({ tool, getPending, post }) => {
+  const execution = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
+  const prompt = await getPending(5000)
+  assert.equal(typeof prompt.body.revision, 'number', 'the pending view carries a revision')
+  const revision = prompt.body.revision
+
+  // Timing out with an unchanged revision keeps the same prompt instead of
+  // reporting it settled.
+  const started = Date.now()
+  const timed = await getPending(300, revision)
+  assert.ok(Date.now() - started >= 250, 'the long-poll honors the wait window')
+  assert.equal(timed.body.id, prompt.body.id, 'an unchanged view keeps the pending prompt')
+  assert.equal(timed.body.revision, revision, 'an unchanged view keeps the revision')
+
+  // A second viewer that already observed this revision waits for a change and
+  // must not be woken while the prompt is still pending.
+  let watched = false
+  const watcher = getPending(20000, revision).then((value) => {
+    watched = true
+    return value
+  })
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  assert.equal(watched, false, 'unchanged revision keeps the long-poll open')
+
+  await post('/answer', { id: prompt.body.id, password: PASSWORD })
+  const answered = await watcher
+  assert.equal(answered.body.id, undefined, 'the settled prompt is gone')
+  assert.ok(answered.body.revision > revision, 'answer advances the revision')
+  await execution
+
+  // Cancelling from one viewer wakes the others the same way.
+  const cancelled = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: signal() })
+  const cancelRejection = assert.rejects(cancelled, /cancelled by the user/)
+  const cancelPrompt = await getPending(5000)
+  const cancelWatcher = getPending(20000, cancelPrompt.body.revision)
+  await post('/cancel', { id: cancelPrompt.body.id })
+  const afterCancel = await cancelWatcher
+  assert.equal(afterCancel.body.id, undefined, 'the cancelled prompt is gone')
+  assert.ok(afterCancel.body.revision > cancelPrompt.body.revision, 'cancel advances the revision')
+  await cancelRejection
+
+  // Stopping the turn withdraws the prompt and notifies the viewers too.
+  const controller = new AbortController()
+  const aborted = tool.execute({ host: 'aliyun', command: 'id -u' }, { signal: controller.signal })
+  const abortRejection = assert.rejects(aborted, /aborted before the password was entered/)
+  const abortPrompt = await getPending(5000)
+  const abortWatcher = getPending(20000, abortPrompt.body.revision)
+  controller.abort()
+  const afterAbort = await abortWatcher
+  assert.equal(afterAbort.body.id, undefined, 'the withdrawn prompt is gone')
+  assert.ok(afterAbort.body.revision > abortPrompt.body.revision, 'abort advances the revision')
+  await abortRejection
+  console.log('ok: settling a prompt notifies every polling client')
 })
 
 process.env.PATH = originalPath

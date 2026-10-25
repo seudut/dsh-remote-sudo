@@ -17,6 +17,7 @@ A composer-hosted sudo password prompt for DeepSeek Harness: the password goes t
 ### 功能
 
 - **composer 面板**：接管输入框，显示主机、命令、密码；Enter 提交，Esc 取消。
+- **多端同步**：电脑和手机（dsh-pocket）同时打开时，任意一端提交或取消密码，其他端的面板会立即撤销，不会残留。
 - **单一缓存开关**：`passwordTtlMs: 0` 每次都要密码；正整数时密码只在宿主内存保留该时长。
 - **不依赖 sudo ticket**：每次执行后 `sudo -k`，不假设 ticket 能跨 ssh 复用。
 - **自动探测 sudo**：先试常见绝对路径，再用 `command -v sudo` 兜底。
@@ -73,7 +74,7 @@ config:
 | `command` | 是 | 远端 root 命令 |
 | `description` | 否 | 面板里的短标签 |
 
-需要密码时弹面板；`passwordTtlMs` 内不重复弹；取消/停止会结束调用。
+需要密码时弹面板；`passwordTtlMs` 内不重复弹；取消/停止会结束调用。多端同时打开时每端都会看到同一个 prompt，先提交者生效，其余端自动撤销。
 
 ### 安全边界
 
@@ -102,6 +103,7 @@ node test/real-host-probe.mjs   # 手动：真实主机 + 错误密码验证链�
 ### Features
 
 - **Composer panel**: takes over the input box with host, command, and password; Enter submits, Esc cancels.
+- **Multi-device sync**: with the desktop and a phone (dsh-pocket) pointing at the same Host, answering or cancelling on one browser dismisses the prompt everywhere instead of stranding a stale panel.
 - **One cache knob**: `passwordTtlMs: 0` asks every call; a positive value keeps the password in host memory for that window.
 - **No sudo ticket reuse**: runs `sudo -k` after every command and never assumes a no-TTY ticket survives across ssh.
 - **Auto-detect sudo**: common absolute paths first, then `command -v sudo`.
@@ -158,7 +160,7 @@ Ask the agent to call `remote_sudo`:
 | `command` | yes | root command to run remotely |
 | `description` | no | short label shown in the panel |
 
-The panel appears when a password is needed; within `passwordTtlMs` it does not ask again. Cancel/stop ends the call.
+The panel appears when a password is needed; within `passwordTtlMs` it does not ask again. Cancel/stop ends the call. When several browsers are open, each shows the same prompt; the first answer wins and the others dismiss themselves.
 
 ### Security
 

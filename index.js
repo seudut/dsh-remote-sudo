@@ -3,6 +3,10 @@
  *
  * Registers the `remote_sudo` tool and the `/_dsh/dsh-remote-sudo/*` route the
  * Client half uses to fetch a pending password prompt and submit the password.
+ * Every pending-set change advances a monotonic revision, and clients long-poll
+ * with the revision they last saw: a prompt answered, cancelled, or withdrawn
+ * by one browser therefore settles the stale panels on every other browser
+ * (for example the desktop when the password was submitted from a phone).
  *
  * Password handling: the password lives only in this process's memory and in
  * the ssh child's stdin. It is never placed in the tool call, the session log,
@@ -115,6 +119,18 @@ function numberOption(value, min, max, fallback) {
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed)) return fallback
   return Math.min(Math.max(parsed, min), max)
+}
+
+/**
+ * Parse the `since` revision a polling client already observed.
+ * @param {string|null} value raw query value.
+ * @returns {number|undefined} non-negative safe integer, or undefined when the
+ *   parameter is absent or malformed (the legacy no-revision poll).
+ */
+function parseRevision(value) {
+  if (value === null || value.length === 0) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 /**
@@ -282,6 +298,8 @@ export function apply(ctx, config = {}) {
   const waiters = new Set()
   /** @type {Map<string, {value: string, expiresAt: number}>} */
   const cachedPasswords = new Map()
+  /** Monotonic revision of the pending set, echoed by every `/pending` view. */
+  let revision = 0
 
   function snapshot() {
     const first = pending.values().next().value
@@ -294,6 +312,7 @@ export function apply(ctx, config = {}) {
       ...(first.sessionId === undefined ? {} : { sessionId: first.sessionId }),
       createdAt: first.createdAt,
       count: pending.size,
+      revision,
     }
   }
 
@@ -302,14 +321,26 @@ export function apply(ctx, config = {}) {
   }
 
   /**
+   * Record one pending-set change and wake every long-poll. Called for a new
+   * prompt and for every way a prompt can end: answer, cancel, turn abort, or
+   * plugin unload.
+   */
+  function touch() {
+    revision += 1
+    wakeWaiters()
+  }
+
+  /**
    * Resolve with the current or next prompt, or null after the wait.
    * @param {number} ms maximum wait.
    * @param {import('node:http').IncomingMessage} req request used to stop early.
+   * @param {number|undefined} since revision the caller already observed;
+   *   undefined keeps the legacy policy of waiting only while no prompt exists.
    * @returns {Promise<ReturnType<typeof snapshot>>} prompt snapshot.
    */
-  function waitForPrompt(ms, req) {
-    const now = snapshot()
-    if (now !== null || ms <= 0) return Promise.resolve(now)
+  function waitForPrompt(ms, req, since) {
+    const changed = () => since === undefined ? snapshot() !== null : revision !== since
+    if (ms <= 0 || changed()) return Promise.resolve(snapshot())
     return new Promise((resolve) => {
       let settled = false
       const finish = () => {
@@ -342,16 +373,18 @@ export function apply(ctx, config = {}) {
         ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
         createdAt: Date.now(),
         resolve: (value) => {
-          pending.delete(id)
+          if (!pending.delete(id)) return
+          touch()
           resolve(value)
         },
         reject: (error) => {
-          pending.delete(id)
+          if (!pending.delete(id)) return
+          touch()
           reject(error)
         },
       }
       pending.set(id, entry)
-      wakeWaiters()
+      touch()
       request.signal?.addEventListener('abort', () => {
         entry.reject(new Error('remote_sudo was aborted before the password was entered'))
       }, { once: true })
@@ -383,8 +416,9 @@ export function apply(ctx, config = {}) {
         }
         const requested = Number(url.searchParams.get('wait') ?? '0')
         const wait = Number.isFinite(requested) ? Math.min(Math.max(requested, 0), 25000) : 0
-        const prompt = await waitForPrompt(wait, req)
-        sendJson(res, 200, prompt ?? {})
+        const since = parseRevision(url.searchParams.get('since'))
+        const prompt = await waitForPrompt(wait, req, since)
+        sendJson(res, 200, prompt ?? { revision })
         return
       }
 

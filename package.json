@@ -45,7 +45,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node test/host-test.mjs && node test/client-render-test.mjs"
+    "test": "node test/host-test.mjs && node test/client-render-test.mjs && node test/client-settle-test.mjs"
   },
   "dsh": {
     "bundle": {
