@@ -9,6 +9,10 @@
  * through dsh-pocket, another tab) settles this panel instead of stranding it.
  * The password travels browser → Host over the same authenticated origin; it
  * never enters the session log or a tool call.
+ *
+ * The published interaction reports kind `approval` while staying a distinct
+ * class, so the session-list waiting marker and notification plugins treat the
+ * prompt like a permission request without handing it to DSH's approval panel.
  */
 
 window.__ModuleLoader__.load({
@@ -22,7 +26,19 @@ window.__ModuleLoader__.load({
     const POLL_WAIT_MS = 20000
     const RETRY_DELAY_MS = 2000
     const LEGACY_RECHECK_MS = 2000
-    const KIND = 'sudo-password'
+    /**
+     * Kind reported for the pending interaction. It is deliberately `approval`:
+     * DSH's session-list waiting marker and notification plugins read this
+     * string by value, so a private kind such as `sudo-password` would leave the
+     * prompt without a sidebar marker, alert sound, or system notification.
+     * DSH's own approval and question panels claim interactions by class
+     * (`instanceof PendingApproval` / `PendingQuestion`), never by kind, so
+     * reporting `approval` cannot make them render this prompt: the composer
+     * panel below still selects by `instanceof SudoPrompt`.
+     */
+    const REPORTED_KIND = 'approval'
+    /** Tool name reported with the kind; notifications show it as the detail. */
+    const TOOL_NAME = 'remote_sudo'
     const NS = 'dsh-remote-sudo'
 
     /** Simplified Chinese dictionary. */
@@ -159,7 +175,8 @@ window.__ModuleLoader__.load({
     /** One published prompt; the composer panel drives answer/cancel. */
     class SudoPrompt {
       constructor(value, noteHostState) {
-        this.kind = KIND
+        this.kind = REPORTED_KIND
+        this.toolName = TOOL_NAME
         this.key = value.id
         this.id = value.id
         this.host = value.host
@@ -325,8 +342,11 @@ window.__ModuleLoader__.load({
       inject: ['locale', 'slots', 'uiSession'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-remote-sudo: dictionaries')
+        // DSH projects one pending interaction per session and picks it by
+        // precedence over every contributing plugin, so this rank must use the
+        // class: real approvals now share our reported kind and must stay at 0.
         const publish = ctx.uiSession.registerPendingInteraction((pending) =>
-          pending.kind === KIND ? 3 : 0,
+          pending instanceof SudoPrompt ? 3 : 0,
         )
         const controller = new AbortController()
         let active = null
@@ -435,7 +455,7 @@ window.__ModuleLoader__.load({
           priority: 2,
           locale: NS,
           select: ({ pendingInteraction }) =>
-            pendingInteraction !== undefined && pendingInteraction.kind === KIND ? pendingInteraction : null,
+            pendingInteraction instanceof SudoPrompt ? pendingInteraction : null,
         }, SudoPromptPanel))
       },
     }

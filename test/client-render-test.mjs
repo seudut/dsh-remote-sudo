@@ -15,7 +15,26 @@ globalThis.window = {
     },
   },
 }
-globalThis.fetch = () => new Promise(() => {})
+/** The single Host view the scripted long-poll delivers, then hangs. */
+let served = false
+globalThis.fetch = () => {
+  if (served) return new Promise(() => {})
+  served = true
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        id: 'p1',
+        revision: 1,
+        epoch: 'boot-a',
+        host: 'aliyun',
+        command: 'apt-get update',
+        description: '更新索引',
+      }
+    },
+  })
+}
 globalThis.document = { activeElement: null }
 
 const fakeReact = {
@@ -46,6 +65,7 @@ assert.deepEqual(moduleFace.inject, ['locale', 'slots', 'uiSession'])
 
 let precedence
 let publish
+let publishedPrompt
 let slotOptions
 let Panel
 const disposers = []
@@ -78,7 +98,7 @@ const ctx = {
     registerPendingInteraction(value) {
       precedence = value
       publish = (prompt, delegate) => {
-        assert.equal(prompt.kind, 'sudo-password')
+        publishedPrompt = prompt
         assert.equal(typeof delegate, 'function')
         return () => {}
       }
@@ -93,16 +113,20 @@ assert.equal(slotOptions.name, 'conversation.composer')
 assert.equal(slotOptions.priority, 2)
 assert.equal(slotOptions.locale, 'dsh-remote-sudo')
 assert.equal(typeof slotOptions.select, 'function')
-assert.equal(precedence({ kind: 'sudo-password' }), 3)
-assert.equal(precedence({ kind: 'approval' }), 0)
 
-const prompt = {
-  kind: 'sudo-password',
-  id: 'p1',
-  host: 'aliyun',
-  command: 'apt-get update',
-  description: '更新索引',
+// Wait for the scripted Host view to publish the real SudoPrompt instance.
+const deadline = Date.now() + 2000
+while (publishedPrompt === undefined && Date.now() < deadline) {
+  await new Promise((resolve) => setTimeout(resolve, 5))
 }
+assert.ok(publishedPrompt, 'the pending view published an interaction')
+assert.equal(publishedPrompt.kind, 'approval', 'reports the shared approval kind')
+assert.equal(publishedPrompt.toolName, 'remote_sudo', 'names the tool for notifications')
+assert.equal(precedence(publishedPrompt), 3, 'our own prompt outranks other interactions')
+assert.equal(precedence({ kind: 'approval' }), 0, 'a real approval keeps precedence 0')
+assert.equal(precedence({ kind: 'sudo-password' }), 0, 'identity is the class, not the old kind')
+
+const prompt = publishedPrompt
 assert.equal(slotOptions.select({ pendingInteraction: prompt }), prompt)
 assert.equal(slotOptions.select({ pendingInteraction: { kind: 'approval' } }), null)
 assert.equal(slotOptions.select({}), null)
