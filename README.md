@@ -35,10 +35,10 @@ dsh plugin --profile desktop add dsh-remote-sudo
 **从 GitHub**：
 
 ```bash
-dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.2
+dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.3
 ```
 
-或在插件管理器里选“从 Git 仓库安装”，填 `github:seudut/dsh-remote-sudo#v0.1.2`。
+或在插件管理器里选“从 Git 仓库安装”，填 `github:seudut/dsh-remote-sudo#v0.1.3`。
 
 然后在 profile 的 `cordis.patch.yml` 加入：
 
@@ -122,10 +122,10 @@ dsh plugin --profile desktop add dsh-remote-sudo
 **From GitHub**:
 
 ```bash
-dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.2
+dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.3
 ```
 
-Or use the plugin manager's "install from Git repository" with `github:seudut/dsh-remote-sudo#v0.1.2`.
+Or use the plugin manager's "install from Git repository" with `github:seudut/dsh-remote-sudo#v0.1.3`.
 
 Then add this row to the profile's `cordis.patch.yml`:
 
