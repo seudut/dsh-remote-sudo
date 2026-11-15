@@ -37,7 +37,11 @@ window.__ModuleLoader__.load({
      * panel below still selects by `instanceof SudoPrompt`.
      */
     const REPORTED_KIND = 'approval'
-    /** Tool name reported with the kind; notifications show it as the detail. */
+    /**
+     * Tool name reported with the kind. Notification plugins show it as the
+     * alert detail, so the prompt appends the SSH alias to it; a bare
+     * `remote_sudo` would not say which machine is about to get a root command.
+     */
     const TOOL_NAME = 'remote_sudo'
     const NS = 'dsh-remote-sudo'
 
@@ -176,7 +180,7 @@ window.__ModuleLoader__.load({
     class SudoPrompt {
       constructor(value, noteHostState) {
         this.kind = REPORTED_KIND
-        this.toolName = TOOL_NAME
+        this.toolName = `${TOOL_NAME}(${value.host})`
         this.key = value.id
         this.id = value.id
         this.host = value.host

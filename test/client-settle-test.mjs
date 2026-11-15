@@ -142,7 +142,7 @@ const ctx = {
       return (interaction, delegate) => {
         // Raised inside the poll loop, whose catch would swallow a throw.
         if (interaction.kind !== 'approval') errors.push(new Error(`unexpected kind: ${interaction.kind}`))
-        if (interaction.toolName !== 'remote_sudo') errors.push(new Error(`unexpected toolName: ${interaction.toolName}`))
+        if (interaction.toolName !== 'remote_sudo(aliyun)') errors.push(new Error(`unexpected toolName: ${interaction.toolName}`))
         if (precedence(interaction) !== 3) errors.push(new Error('the published prompt must outrank other interactions'))
         if (published.has(interaction.key)) {
           errors.push(new Error(`duplicate publication: ${interaction.key}`))

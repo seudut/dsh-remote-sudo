@@ -121,7 +121,7 @@ while (publishedPrompt === undefined && Date.now() < deadline) {
 }
 assert.ok(publishedPrompt, 'the pending view published an interaction')
 assert.equal(publishedPrompt.kind, 'approval', 'reports the shared approval kind')
-assert.equal(publishedPrompt.toolName, 'remote_sudo', 'names the tool for notifications')
+assert.equal(publishedPrompt.toolName, 'remote_sudo(aliyun)', 'names the tool and the host for notifications')
 assert.equal(precedence(publishedPrompt), 3, 'our own prompt outranks other interactions')
 assert.equal(precedence({ kind: 'approval' }), 0, 'a real approval keeps precedence 0')
 assert.equal(precedence({ kind: 'sudo-password' }), 0, 'identity is the class, not the old kind')
