@@ -17,6 +17,7 @@ A composer-hosted sudo password prompt for DeepSeek Harness: the password goes t
 ### 功能
 
 - **composer 面板**：接管输入框，显示主机、命令、密码；Enter 提交，Esc 取消。
+- **和审批一样的提醒**：面板以 `approval` 交互上报，侧栏出现等待授权标记，通知插件（如 dsh-session-notification）会照「权限请求」播放提示音并发系统通知；是否在你正盯着该会话时提醒，由通知插件自己的设置决定。
 - **多端同步**：电脑和手机（dsh-pocket）同时打开时，任意一端提交或取消密码，其他端的面板会立即撤销，不会残留。
 - **单一缓存开关**：`passwordTtlMs: 0` 每次都要密码；正整数时密码只在宿主内存保留该时长。
 - **不依赖 sudo ticket**：每次执行后 `sudo -k`，不假设 ticket 能跨 ssh 复用。
@@ -34,10 +35,10 @@ dsh plugin --profile desktop add dsh-remote-sudo
 **从 GitHub**：
 
 ```bash
-dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.1
+dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.2
 ```
 
-或在插件管理器里选“从 Git 仓库安装”，填 `github:seudut/dsh-remote-sudo#v0.1.1`。
+或在插件管理器里选“从 Git 仓库安装”，填 `github:seudut/dsh-remote-sudo#v0.1.2`。
 
 然后在 profile 的 `cordis.patch.yml` 加入：
 
@@ -103,6 +104,7 @@ node test/real-host-probe.mjs   # 手动：真实主机 + 错误密码验证链�
 ### Features
 
 - **Composer panel**: takes over the input box with host, command, and password; Enter submits, Esc cancels.
+- **Approval-grade alerts**: the panel reports an `approval` interaction, so the session list shows a waiting marker and notification plugins (such as dsh-session-notification) play the permission sound and raise a system notification; whether that happens while you are already looking at the session is up to the notification plugin's own settings.
 - **Multi-device sync**: with the desktop and a phone (dsh-pocket) pointing at the same Host, answering or cancelling on one browser dismisses the prompt everywhere instead of stranding a stale panel.
 - **One cache knob**: `passwordTtlMs: 0` asks every call; a positive value keeps the password in host memory for that window.
 - **No sudo ticket reuse**: runs `sudo -k` after every command and never assumes a no-TTY ticket survives across ssh.
@@ -120,10 +122,10 @@ dsh plugin --profile desktop add dsh-remote-sudo
 **From GitHub**:
 
 ```bash
-dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.1
+dsh plugin --profile desktop add github:seudut/dsh-remote-sudo#v0.1.2
 ```
 
-Or use the plugin manager's "install from Git repository" with `github:seudut/dsh-remote-sudo#v0.1.1`.
+Or use the plugin manager's "install from Git repository" with `github:seudut/dsh-remote-sudo#v0.1.2`.
 
 Then add this row to the profile's `cordis.patch.yml`:
 
